@@ -26,9 +26,10 @@ npm run build        # 即 tsc -p tsconfig.json，重生成 lib/index.js
 
 ## CI / 发布
 
-- **CI**（`.github/workflows/ci.yml`）：每次 `push` / `pull_request` 自动 `npm ci && npm run build`，
-  并校验 `lib/` 编译产物与提交一致（改了 `src` 却忘编译会失败）。
-- **发布**：打一个 `v*` 标签（如 `v0.1.1`）推送到 GitHub，CI 在构建通过后自动
+- **CI**（`.github/workflows/ci.yml`）：每次 `push` / `pull_request` 自动：
+  - `npm ci && npm run build`，并校验 `lib/` 编译产物与提交一致（改了 `src` 却忘编译会失败）；
+  - 跑 Python 纯逻辑单测（`test_detect.py`，仅需 Pillow，Linux 可运行）。
+- **发布**：打一个 `v*` 标签（如 `v0.1.1`）推送到 GitHub，CI 在构建+测试通过后自动
   `npm pack` 出 `vision-<version>.tgz` 并创建 GitHub Release 上传该产物，
   可直接 `dsh plugin add ./vision-0.1.1.tgz` 安装。
 
@@ -74,10 +75,10 @@ dsh plugin add C:\Users\14339\Desktop\git\C-Vision\C-Vision
 
 ## 模型怎么用
 
-模型选择支持图片的 `deepseek-v4-flash-vision-exp` 后，直接说：
+模型选择支持图片的 `deepseek-v4-flash-vision-exp` 后：
 
-- "用 see 看一下屏幕" → `see()`
-- "用 see 看看 VS Code 窗口" → `see(window="Visual Studio Code", maximize=true)`
+- "列一下可见窗口" → `list_windows()`（先找到目标窗口）→ "用 see 看 VS Code" → `see(window="Visual Studio Code", maximize=true)`。
+- 直接说 "用 see 看一下屏幕" → `see()`。
 
 ## 目录结构
 
@@ -88,16 +89,19 @@ vision/                      # 仓库根 = 插件本体
   tsconfig.json         # TS 配置（pnpm build -> tsc）
   package.json          # 声明 dsh.bundle，files 含 lib/cvision/requirements.txt
   cordis.patch.yml      # bundle 的配置层，按包名引用
-  requirements.txt      # Python 依赖（随包分发）
-  cvision/              # 捆绑的 Python 版 cvision（截屏实现）
-    capturer.py         #   窗口枚举 + 截图（PrintWindow/GPU 窗口自愈回退）
-    cli_capture.py      #   跨语言 CLI：python -m cvision.cli_capture
+  requirements.txt      # Python 依赖（随包分发，含可选的 winsdk）
+  cvision/              # 捆绑的 Python 版 cvision（截屏实现；已裁剪为插件所需）
+    __init__.py         #   包标记
+    capturer.py         #   窗口枚举 + 截图（WGC > PrintWindow > 读合成桌面区域 回退）
+    detect.py           #   纯逻辑判定（GPU 类/空白帧），不依赖 win32，可跨平台单测
+    cli_capture.py      #   跨语言 CLI：python -m cvision.cli_capture [--list]
     encoding.py         #   PIL -> base64 data URL
-    deepseek.py         #   视觉模型调用（MCP server 用）
-    server.py           #   FastMCP MCP server（MCP 侧用）
-    config.py           #   配置
+  tests/
+    test_detect.py      #   detect 模块纯逻辑单测（PIL only，Linux CI 可跑）
   README.md
 ```
+
+> 注：MCP server 相关的 `config.py`/`deepseek.py`/`server.py` 已从捆绑包移除（插件截屏无需它们，也免去了 `DEEPSEEK_API_KEY` 依赖）。
 
 ## 说明与限制
 
