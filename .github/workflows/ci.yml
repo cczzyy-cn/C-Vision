@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install (npm ci)
+        run: npm ci
+
+      - name: Build (tsc -> lib/index.js)
+        run: npm run build
+
+      # 防止只改 src/index.ts 而忘了重新编译：编译产物若与已提交的 lib/ 不一致则失败。
+      - name: Verify compiled lib/ is in sync
+        run: |
+          if [ -n "$(git status --porcelain -- lib/)" ]; then
+            echo "::error::lib/ 与 src 编译产物不一致 —— 请运行 \`npm run build\` 并提交 lib/index.js。"
+            echo "--- git diff lib/ ---"
+            git diff -- lib/
+            exit 1
+          fi
+          echo "lib/ is in sync with src/index.ts."
