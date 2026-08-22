@@ -1,7 +1,10 @@
 """Windows 屏幕/窗口捕获：枚举可见顶层窗口、抓取窗口或全屏。
 
-依赖 pywin32 + Pillow。窗口捕获优先使用 ``PrintWindow(PW_RENDERFULLCONTENT)``，
-可以抓取被遮挡/非前台窗口的画面；失败时回退到整屏 ``ImageGrab`` 裁剪窗口矩形。
+依赖 pywin32 + Pillow（WGC 后端可选依赖 winsdk）。窗口捕获优先级：
+    Windows Graphics Capture(真实合成内容) > PrintWindow(PW_RENDERFULLCONTENT) >
+    ImageGrab 读合成桌面区域。
+WGC 能抓 GPU/Chromium 合成窗口与「被遮挡窗口」的真实内容；PrintWindow 只对普通
+GDI 窗口可靠；读合成桌面区域作为最后兜底。
 """
 
 from __future__ import annotations
@@ -347,6 +350,98 @@ def maximize_window(handle: int, keep_foreground: bool = True) -> None:
     time.sleep(0.6)
 
 
+# ── Windows Graphics Capture (WGC) 后端：抓取窗口「真实合成内容」 ──────────────
+# WGC (Win10 1903+) 能捕获 GPU 合成窗口的真实画面，且对「被其它窗口遮挡」的窗口
+# 依然有效（比读合成桌面区域更准）。依赖 `winsdk`（WinRT 绑定），未安装或捕获失败
+# 时本函数返回 None，由调用方回退到 PrintWindow / 读合成桌面区域。
+_WGC_CACHE: bool | None = None
+
+
+def _wgc_backend_available() -> bool:
+    """懒加载判断 winsdk 是否可用（仅探测一次）。"""
+    global _WGC_CACHE
+    if _WGC_CACHE is None:
+        try:
+            import winsdk._winrt  # noqa: F401
+            _WGC_CACHE = True
+        except Exception:
+            _WGC_CACHE = False
+    return _WGC_CACHE
+
+
+def capture_window_wgc(hwnd: int, timeout: float = 4.0) -> Image.Image | None:
+    """用 Windows Graphics Capture 抓取指定窗口的真实合成内容。
+
+    优点: 针对 GPU/Chromium 合成窗口可靠，能捕获被其它窗口遮挡窗口的内容。
+    局限: 无法捕获已最小化（未合成）的窗口内容；依赖 ``winsdk``。
+
+    返回 PIL 图；任何失败/超时/未安装均返回 None（不抛错，由调用方回退）。
+    """
+    import asyncio
+    import threading
+
+    try:
+        import winsdk._winrt as wr
+        import winsdk.windows.graphics.capture as gc
+        from winsdk.windows.graphics.capture.interop import create_for_window
+        from winsdk.windows.ai.machinelearning import LearningModelDevice, LearningModelDeviceKind
+        from winsdk.windows.graphics.directx import DirectXPixelFormat
+        from winsdk.windows.graphics.imaging import SoftwareBitmap, BitmapBufferAccessMode
+    except Exception:
+        return None
+
+    session = pool = None
+    try:
+        wr.init_apartment(wr.MTA)
+        item = create_for_window(hwnd)
+        device = LearningModelDevice(LearningModelDeviceKind.DIRECT_X_HIGH_PERFORMANCE).direct3_d11_device
+        pool = gc.Direct3D11CaptureFramePool.create_free_threaded(
+            device,
+            DirectXPixelFormat.B8_G8_R8_A8_UINT_NORMALIZED,
+            1,
+            item.size,
+        )
+        session = pool.create_capture_session(item)
+        session.start_capture()
+
+        ev = threading.Event()
+        frames = []
+
+        def on_frame(_sender, _args) -> None:
+            f = pool.try_get_next_frame()
+            if f is not None:
+                frames.append(f)
+                ev.set()
+
+        pool.add_frame_arrived(on_frame)
+        if not ev.wait(timeout):
+            return None
+        frame = frames[0]
+
+        async def _copy_surface():
+            op = SoftwareBitmap.create_copy_from_surface_async(frame.surface)
+            return await op
+
+        sb = asyncio.run(_copy_surface())
+        buf = sb.lock_buffer(BitmapBufferAccessMode.READ)
+        raw = bytes(buf.create_reference())
+        # 帧面为 BGRA，这里转成 RGB 的 PIL 图
+        return Image.frombytes("RGBA", (sb.pixel_width, sb.pixel_height), raw).convert("RGB")
+    except Exception:
+        return None
+    finally:
+        try:
+            if session is not None:
+                session.close()
+        except Exception:
+            pass
+        try:
+            if pool is not None:
+                pool.close()
+        except Exception:
+            pass
+
+
 def capture_window(
     handle: int | None = None,
     title_substr: str | None = None,
@@ -361,6 +456,8 @@ def capture_window(
     - 两者都传时，优先使用 ``handle``。
 
     抓取策略:
+        0. **Windows Graphics Capture (WGC)**：若 ``winsdk`` 可用，优先用它抓窗口的
+           **真实合成内容**（对 GPU/Chromium/被遮挡窗口最准）。失败/超时则回退。
         1. 已知 GPU 合成窗口（Chromium/Electron/UWP 等，按类名或
            ``WS_EX_NOREDIRECTIONBITMAP`` 识别）——直接抓**合成桌面区域**，
            跳过 PrintWindow（对其不可靠，常返回空白/部分帧）。
@@ -393,16 +490,23 @@ def capture_window(
         # 预置屏幕状态：最大化（可选）或恢复最小化，保证目标窗口可见且在前台
         _prepare_window_for_capture(handle, maximize=maximize)
 
-        # GPU 合成窗口：跳过 PrintWindow，直接读合成桌面区域
+        # 0. WGC 优先：抓窗口真实合成内容（GPU/被遮挡窗口最准）。失败则回退。
+        if _wgc_backend_available():
+            wgc_img = capture_window_wgc(handle)
+            if wgc_img is not None:
+                return wgc_img
+
+        # 1. GPU 合成窗口：跳过 PrintWindow，直接读合成桌面区域
         if _is_gpu_composited_window(handle):
             return _grab_region()
 
+        # 2. 普通 GDI 窗口：优先 PrintWindow（可抓被遮挡内容）
         img = _print_window(handle)
         if img is not None and not _is_blank_image(img):
             return img
 
-        # PrintWindow 抓不到（返回空白/部分空白帧）→ 读合成桌面区域。
-        # 若刚最大化过则已是前台；这里再确保一次，避免被遮挡。
+        # 3. PrintWindow 抓不到（返回空白/部分空白帧）→ 读合成桌面区域。
+        #    若刚最大化过则已是前台；这里再确保一次，避免被遮挡。
         return _grab_region()
     finally:
         _restore_placement(handle, saved_placement)

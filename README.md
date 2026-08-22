@@ -102,7 +102,7 @@ vision/                      # 仓库根 = 插件本体
 ## 说明与限制
 
 - 跨语言：插件用 `child_process` 调 `python -m cvision.cli_capture`，需目标机器 Windows 桌面 + Python。
-- 截图能力：`capturer.capture_window` 对普通窗口走 `PrintWindow`；对 GPU 合成窗口（Chromium/Electron 等，如网易云 `OrpheusBrowserHost`）会自愈回退到"读合成桌面区域"，见 `cvision/capturer.py`。
+- 截图能力：`capturer.capture_window` 依次尝试：**Windows Graphics Capture**（真实合成内容，抓 GPU/Chromium/被遮挡窗口最准，需 `winsdk`）→ `PrintWindow`（普通 GDI 窗口）→ 读合成桌面区域（兜底）。见 `cvision/capturer.py`。未装 `winsdk` 时自动跳过 WGC。
 - 附件限制：Harness attachment 单图源 ≤20MiB、单边 ≤8192px、每条消息 ≤20 张；超大屏默认 PNG/JPEG 视情况。
 - 截图后窗口**还原原状态、不抢焦点**。
 - 插件本体（`src/index.ts` → `lib/index.js`）未在本环境端到端跑过（无 DSH 运行时）；按 `@deepseek-ai/dsh-tools` / `ctx.attachments.saveImage` 官方接口编写，需在你的 DSH Desktop 中 `dsh plugin add` + 重启后验证。
