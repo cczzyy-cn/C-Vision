@@ -31,7 +31,7 @@ const execFileAsync = promisify(execFile)
 export const name = 'cvision-vision'
 export const inject = ['tools', 'attachments']
 
-const MEDIA_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
+const MEDIA_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'] as const
 type MediaType = (typeof MEDIA_TYPES)[number]
 
 /** 从插件自身位置向上查找含 `cvision/` 的包根（入口在 lib/index.js 时需上移一层）。 */
@@ -100,7 +100,7 @@ export function apply(ctx: Context): void {
           properties: { ref: { type: 'object', additionalProperties: true } },
           additionalProperties: false,
         },
-        render: (_args, value) => [{ type: 'image', attachment: value.ref as ImageAttachmentRef }],
+        render: (_args, value) => [{ type: 'image', attachment: value.ref as unknown as ImageAttachmentRef }],
       },
       // 协作式超时：把 exec.signal 转给子进程，取消/超时即终止 python 截屏。
       timeoutMs: 60000,
