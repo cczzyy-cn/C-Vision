@@ -24,6 +24,18 @@
 npm run build        # 即 tsc -p tsconfig.json，重生成 lib/index.js
 ```
 
+## CI / 发布
+
+- **CI**（`.github/workflows/ci.yml`）：每次 `push` / `pull_request` 自动 `npm ci && npm run build`，
+  并校验 `lib/` 编译产物与提交一致（改了 `src` 却忘编译会失败）。
+- **发布**：打一个 `v*` 标签（如 `v0.1.0`）推送到 GitHub，CI 在构建通过后自动
+  `npm pack` 出 `cvision-vision-<version>.tgz` 并创建 GitHub Release 上传该产物，
+  可直接 `dsh plugin add ./cvision-vision-0.1.0.tgz` 安装。
+
+```bash
+git tag v0.1.0 && git push origin v0.1.0
+```
+
 ## 前提
 
 - 目标机器：Windows 桌面 + 有 Python 3（插件靠 `child_process` 调 `python -m cvision.cli_capture`）。
