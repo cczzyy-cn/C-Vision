@@ -29,12 +29,12 @@ npm run build        # 即 tsc -p tsconfig.json，重生成 lib/index.js
 - **CI**（`.github/workflows/ci.yml`）：每次 `push` / `pull_request` 自动：
   - `npm ci && npm run build`，并校验 `lib/` 编译产物与提交一致（改了 `src` 却忘编译会失败）；
   - 跑 Python 纯逻辑单测（`test_detect.py`，仅需 Pillow，Linux 可运行）。
-- **发布**：打一个 `v*` 标签（如 `v0.1.1`）推送到 GitHub，CI 在构建+测试通过后自动
+- **发布**：打一个 `v*` 标签（如 `v0.1.2`）推送到 GitHub，CI 在构建+测试通过后自动
   `npm pack` 出 `vision-<version>.tgz` 并创建 GitHub Release 上传该产物，
-  可直接 `dsh plugin add ./vision-0.1.1.tgz` 安装。
+  可直接 `dsh plugin add ./vision-0.1.2.tgz` 安装。
 
 ```bash
-git tag v0.1.1 && git push origin v0.1.1
+git tag v0.1.2 && git push origin v0.1.2
 ```
 
 ## 前提
@@ -64,7 +64,7 @@ dsh plugin add C:\Users\14339\Desktop\git\C-Vision\C-Vision
 
 然后**重启 DSH Desktop**。用 `dsh --dump-config` 可看到多出 `# == Vision` 配置层。
 
-> 也可打成 tarball 分发：`npm pack` 后在 DSH 里 `dsh plugin add ./vision-0.1.1.tgz`（无需构建权限）。
+> 也可打成 tarball 分发：`npm pack` 后在 DSH 里 `dsh plugin add ./vision-0.1.2.tgz`（无需构建权限）。
 
 ## 配置（可选）
 
