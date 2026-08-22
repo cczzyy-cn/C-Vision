@@ -15,6 +15,15 @@
 > 注意：`cvision/` 是随包复制的源码快照。仓库根 `cvision/` 的改动不会自动同步到包内；
 > 升级时重新拷贝 → 重新 `dsh plugin add` 即可。
 
+## 构建（仅当改了 `src/*.ts` 才需要）
+
+插件入口 `lib/index.js` 由 `src/index.ts` 编译而来（DSH 运行时只加载 JS）。仓库已提交
+编译好的 `lib/index.js`，装包即可用；若你改了 `src/index.ts`，请在本目录执行：
+
+```bash
+npm run build        # 即 tsc -p tsconfig.json，重生成 lib/index.js
+```
+
 ## 前提
 
 - 目标机器：Windows 桌面 + 有 Python 3（插件靠 `child_process` 调 `python -m cvision.cli_capture`）。
@@ -37,7 +46,7 @@ dsh plugin add <此目录的绝对路径>
 例如（PowerShell）：
 
 ```powershell
-dsh plugin add C:\Users\14339\Desktop\git\C-Vision\C-Vision\dsh-plugin
+dsh plugin add C:\Users\14339\Desktop\git\C-Vision\C-Vision
 ```
 
 然后**重启 DSH Desktop**。用 `dsh --dump-config` 可看到多出 `# == cvision-vision` 配置层。
@@ -61,18 +70,20 @@ dsh plugin add C:\Users\14339\Desktop\git\C-Vision\C-Vision\dsh-plugin
 ## 目录结构
 
 ```
-dsh-plugin/
-  package.json        # 声明 dsh.bundle，files 含 cvision/ 与 requirements.txt
-  index.js            # 插件入口：defineTool 注册 see，返回 image 块
-  cordis.patch.yml    # bundle 的配置层，按包名引用
-  requirements.txt    # Python 依赖（随包分发）
-  cvision/            # 捆绑的 Python 版 cvision（截屏实现）
-    capturer.py       #   窗口枚举 + 截图（PrintWindow/GPU 窗口自愈回退）
-    cli_capture.py    #   跨语言 CLI：python -m cvision.cli_capture
-    encoding.py       #   PIL -> base64 data URL
-    deepseek.py       #   视觉模型调用（MCP server 用）
-    server.py         #   FastMCP MCP server（MCP 侧用）
-    config.py         #   配置
+cvision-vision/             # 仓库根 = 插件本体
+  src/index.ts          # TypeScript 源（作者用 dsh-tools/cordis/dsh-attachment 类型）
+  lib/index.js          # 编译产物（DSH 实际加载；main/exports 指向它）
+  tsconfig.json         # TS 配置（pnpm build -> tsc）
+  package.json          # 声明 dsh.bundle，files 含 lib/cvision/requirements.txt
+  cordis.patch.yml      # bundle 的配置层，按包名引用
+  requirements.txt      # Python 依赖（随包分发）
+  cvision/              # 捆绑的 Python 版 cvision（截屏实现）
+    capturer.py         #   窗口枚举 + 截图（PrintWindow/GPU 窗口自愈回退）
+    cli_capture.py      #   跨语言 CLI：python -m cvision.cli_capture
+    encoding.py         #   PIL -> base64 data URL
+    deepseek.py         #   视觉模型调用（MCP server 用）
+    server.py           #   FastMCP MCP server（MCP 侧用）
+    config.py           #   配置
   README.md
 ```
 
@@ -82,4 +93,4 @@ dsh-plugin/
 - 截图能力：`capturer.capture_window` 对普通窗口走 `PrintWindow`；对 GPU 合成窗口（Chromium/Electron 等，如网易云 `OrpheusBrowserHost`）会自愈回退到"读合成桌面区域"，见 `cvision/capturer.py`。
 - 附件限制：Harness attachment 单图源 ≤20MiB、单边 ≤8192px、每条消息 ≤20 张；超大屏默认 PNG/JPEG 视情况。
 - 截图后窗口**还原原状态、不抢焦点**。
-- 插件本体（`index.js`）未在本环境端到端跑过（无 DSH 运行时）；按 `@deepseek-ai/dsh-tools` / `ctx.attachments.saveImage` 官方接口编写，需在你的 DSH Desktop 中 `dsh plugin add` + 重启后验证。
+- 插件本体（`src/index.ts` → `lib/index.js`）未在本环境端到端跑过（无 DSH 运行时）；按 `@deepseek-ai/dsh-tools` / `ctx.attachments.saveImage` 官方接口编写，需在你的 DSH Desktop 中 `dsh plugin add` + 重启后验证。
