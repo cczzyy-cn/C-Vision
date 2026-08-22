@@ -1,4 +1,4 @@
-# C-Vision · DeepSeek Harness (DSH) 视觉插件
+# Vision · DeepSeek Harness (DSH) 视觉插件
 
 给 DeepSeek Harness 的 agent 提供**自动视觉能力**：模型调用 `see` 工具，得到一张**真实截图（作为图片）**，从而**原生看到画面**（描述、识别截图文字、读图表/文档）。
 
@@ -29,8 +29,8 @@ npm run build        # 即 tsc -p tsconfig.json，重生成 lib/index.js
 - **CI**（`.github/workflows/ci.yml`）：每次 `push` / `pull_request` 自动 `npm ci && npm run build`，
   并校验 `lib/` 编译产物与提交一致（改了 `src` 却忘编译会失败）。
 - **发布**：打一个 `v*` 标签（如 `v0.1.0`）推送到 GitHub，CI 在构建通过后自动
-  `npm pack` 出 `cvision-vision-<version>.tgz` 并创建 GitHub Release 上传该产物，
-  可直接 `dsh plugin add ./cvision-vision-0.1.0.tgz` 安装。
+  `npm pack` 出 `vision-<version>.tgz` 并创建 GitHub Release 上传该产物，
+  可直接 `dsh plugin add ./vision-0.1.0.tgz` 安装。
 
 ```bash
 git tag v0.1.0 && git push origin v0.1.0
@@ -61,9 +61,9 @@ dsh plugin add <此目录的绝对路径>
 dsh plugin add C:\Users\14339\Desktop\git\C-Vision\C-Vision
 ```
 
-然后**重启 DSH Desktop**。用 `dsh --dump-config` 可看到多出 `# == cvision-vision` 配置层。
+然后**重启 DSH Desktop**。用 `dsh --dump-config` 可看到多出 `# == Vision` 配置层。
 
-> 也可打成 tarball 分发：`npm pack` 后在 DSH 里 `dsh plugin add ./cvision-vision-0.1.0.tgz`（无需构建权限）。
+> 也可打成 tarball 分发：`npm pack` 后在 DSH 里 `dsh plugin add ./vision-0.1.0.tgz`（无需构建权限）。
 
 ## 配置（可选）
 
@@ -82,7 +82,7 @@ dsh plugin add C:\Users\14339\Desktop\git\C-Vision\C-Vision
 ## 目录结构
 
 ```
-cvision-vision/             # 仓库根 = 插件本体
+vision/                      # 仓库根 = 插件本体
   src/index.ts          # TypeScript 源（作者用 dsh-tools/cordis/dsh-attachment 类型）
   lib/index.js          # 编译产物（DSH 实际加载；main/exports 指向它）
   tsconfig.json         # TS 配置（pnpm build -> tsc）

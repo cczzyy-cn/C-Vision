@@ -28,7 +28,7 @@ import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 
 const execFileAsync = promisify(execFile)
 
-export const name = 'cvision-vision'
+export const name = 'Vision'
 export const inject = ['tools', 'attachments']
 
 const MEDIA_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'] as const

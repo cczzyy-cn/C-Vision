@@ -1,7 +1,7 @@
 {
-  "name": "cvision-vision",
+  "name": "vision",
   "version": "0.1.0",
-  "description": "C-Vision DSH bundle: give the agent screen/window vision — see tool captures via the bundled Python cvision and returns the image natively",
+  "description": "Vision DSH bundle: give the agent screen/window vision — see tool captures via the bundled Python cvision and returns the image natively",
   "type": "module",
   "main": "./lib/index.js",
   "exports": {
