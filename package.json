@@ -1,0 +1,25 @@
+{
+  "name": "cvision-vision",
+  "version": "0.1.0",
+  "description": "C-Vision DSH bundle: give the agent screen/window vision — see tool captures via the bundled Python cvision and returns the image natively",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": {
+      "default": "./index.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml"
+  },
+  "files": [
+    "index.js",
+    "cordis.patch.yml",
+    "requirements.txt",
+    "cvision/**/*.py",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

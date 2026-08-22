@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.venv/
+venv/
+
+# 环境与密钥
+.env
+*.pem
+
+# Node / 构建
+node_modules/
+*.tgz
+*.png
+*.jpg
+*.jpeg
+
+# 缓存 / 产物
+.pytest_cache/
+.mypy_cache/
+dist/
+build/
+
+# 运行时 / 编辑器
+.idea/
+.vscode/
+.reasonix/
+captures/
