@@ -185,22 +185,6 @@ vision/                      # 仓库根 = 插件本体
 - **Windows**：用 `Windows.Media.Ocr`（`winsdk`，系统语言包，免额外二进制）；
 - 回退：装 `pytesseract` + Tesseract 后用其识别（跨平台）。
 
-## 浏览器网页标签截图（实验性）
-
-对 **Chrome/Edge 等 Chromium**，用 CDP 枚举页签、自动切换到每页并截取**页面内容**（不是浏览器窗口，与前台/遮挡无关）：
-
-- **作为插件工具**：`capture_tabs(urls=[...])` 或 `capture_tabs(port=9222)`，直接返回每页截图（图片）。
-- **控制已打开的浏览器**：需浏览器启动时带
-  `--remote-debugging-port=9222 --remote-allow-origins=*`（新版 Chrome 不加后者 WebSocket 会被 403 拒）。
-- 或**新建**一个带调试端口的实例并把 URL 作为页签：
-  ```bash
-  python -m cvision.cli_tabs --launch --headless --urls https://a.com https://b.com --out tabcaps
-  # 或连接已有的：
-  python -m cvision.cli_tabs --port 9222 --out tabcaps
-  ```
-- 输出 JSON（每页签标题/URL/保存路径），截图存在 `--out` 目录。
-- 依赖：`requests`、`websocket-client`（已写入 `requirements.txt`）。
-
 ## 多平台支持
 
 - **Windows**：完整支持（WGC/PrintWindow/桌面区域回退），最稳。
