@@ -19,7 +19,9 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { existsSync } from 'node:fs'
-import { dirname, resolve } from 'node:path'
+import { readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import type { Context } from '@deepseek-ai/cordis'
@@ -49,6 +51,9 @@ function findPluginRoot(): string {
 const PLUGIN_DIR = findPluginRoot()
 const PYTHON = process.env.CVISION_PYTHON ?? 'python'
 const CVISION_DIR = process.env.CVISION_DIR || PLUGIN_DIR
+
+// 单次 capture_tabs 最多返回的图片数（附件限制每条消息 ≤20 张图）。
+const MAX_TABS = 20
 
 interface ParsedCapture {
   data: Uint8Array
@@ -165,6 +170,91 @@ export function apply(ctx: Context): void {
         })
         const windows = JSON.parse(stdout) as Array<Record<string, JsonValue>>
         return { windows }
+      },
+    }),
+  )
+
+  ctx.tools.register(
+    defineTool({
+      name: 'capture_tabs',
+      description:
+        '自动切换并截图浏览器（Chrome/Edge 等 Chromium）的各网页标签，返回每页截图（图片）。' +
+        '传 urls 会用一个无头浏览器打开这些页面并逐个截图；不传 urls 则连接已带 ' +
+        '--remote-debugging-port=<port> 和 --remote-allow-origins=* 的浏览器并截其现有页签。',
+      parameters: {
+        urls: { type: 'array', items: { type: 'string' }, description: '要打开的页面 URL；为空则连接已有浏览器' },
+        port: { type: 'integer', description: 'CDP 端口，默认 9222' },
+        full_page: { type: 'boolean', description: '整页截图（captureBeyondViewport=true），默认 false' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          properties: {
+            captures: {
+              type: 'array',
+              items: { type: 'object', additionalProperties: true },
+            },
+          },
+          additionalProperties: false,
+        },
+        render: (_args, value) =>
+          (value.captures as Array<Record<string, JsonValue>>).flatMap((c) => {
+            const label = `${String(c.title ?? '')}  ${String(c.url ?? '')}`
+            const ref = c.ref as unknown as ImageAttachmentRef | undefined
+            return ref
+              ? [{ type: 'text' as const, text: label }, { type: 'image' as const, attachment: ref }]
+              : [{ type: 'text' as const, text: `${label}  (失败: ${String(c.error ?? '')})` }]
+          }),
+      },
+      timeoutMs: 120000,
+      async execute(args, exec) {
+        assertCvisionPresent()
+        const port = args.port ?? 9222
+        const outDir = join(tmpdir(), `vision-tabs-${Date.now()}`)
+        const cmdArgs = ['-m', 'cvision.cli_tabs', '--port', String(port), '--out', outDir]
+        if (args.full_page) cmdArgs.push('--full-page')
+        if (args.urls && args.urls.length > 0) {
+          cmdArgs.push('--launch', '--headless', '--urls', ...args.urls)
+        }
+
+        const { stdout } = await execFileAsync(PYTHON, cmdArgs, {
+          cwd: CVISION_DIR,
+          maxBuffer: 8 * 1024 * 1024,
+          signal: exec.signal,
+        })
+        const info = JSON.parse(stdout) as { tabs?: Array<Record<string, JsonValue>> }
+
+        const captures: Array<Record<string, JsonValue>> = []
+        const seenRef = new Set<string>()
+        for (const tab of (info.tabs ?? []).slice(0, MAX_TABS)) {
+          const path = String(tab.path ?? '')
+          const title = String(tab.title ?? '')
+          const url = String(tab.url ?? '')
+          if (!path) {
+            captures.push({ title, url, error: String(tab.error ?? 'no path') })
+            continue
+          }
+          try {
+            const bytes = await readFile(path)
+            const key = `${path}:${bytes.length}`
+            if (seenRef.has(key)) {
+              captures.push({ title, url, error: 'duplicate' })
+              continue
+            }
+            seenRef.add(key)
+            const ref = await ctx.attachments.saveImage({
+              data: new Uint8Array(bytes),
+              mediaType: 'image/png',
+              name: `vision-tab.${title.replace(/[^a-zA-Z0-9\u4e00-\u9fff_-]+/g, '_').slice(0, 40) || 'tab'}.png`,
+            })
+            captures.push({ ref: ref as unknown as Record<string, JsonValue>, title, url })
+          } catch (e) {
+            captures.push({ title, url, error: `read/save failed: ${(e as Error).message}` })
+          }
+        }
+
+        await rm(outDir, { recursive: true, force: true }).catch(() => undefined)
+        return { captures }
       },
     }),
   )

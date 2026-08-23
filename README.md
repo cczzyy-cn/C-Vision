@@ -79,6 +79,7 @@ dsh plugin add C:\Users\14339\Desktop\git\C-Vision\C-Vision
 
 - "列一下可见窗口" → `list_windows()`（先找到目标窗口）→ "用 see 看 VS Code" → `see(window="Visual Studio Code")`。
 - 直接说 "用 see 看一下屏幕" → `see()`。
+- 看浏览器各页签 → `capture_tabs(urls=[...])`（无头开页/逐个截图）或 `capture_tabs(port=9222)`（连已带调试参数的浏览器）。
 
 > 请遵守下面的「给 AI 智能体的使用提示」——**默认不要 `maximize`，也不要用它去切换/激活前台窗口**。
 
@@ -127,9 +128,10 @@ vision/                      # 仓库根 = 插件本体
 
 对 **Chrome/Edge 等 Chromium**，用 CDP 枚举页签、自动切换到每页并截取**页面内容**（不是浏览器窗口，与前台/遮挡无关）：
 
+- **作为插件工具**：`capture_tabs(urls=[...])` 或 `capture_tabs(port=9222)`，直接返回每页截图（图片）。
 - **控制已打开的浏览器**：需浏览器启动时带
   `--remote-debugging-port=9222 --remote-allow-origins=*`（新版 Chrome 不加后者 WebSocket 会被 403 拒）。
-- 或者**新建**一个带调试端口的实例并把 URL 作为页签：
+- 或**新建**一个带调试端口的实例并把 URL 作为页签：
   ```bash
   python -m cvision.cli_tabs --launch --headless --urls https://a.com https://b.com --out tabcaps
   # 或连接已有的：
