@@ -53,12 +53,12 @@ npm run build        # 即 tsc -p tsconfig.json，重生成 lib/index.js
 - **CI**（`.github/workflows/ci.yml`）：每次 `push` / `pull_request` 自动：
   - `npm ci && npm run build`，并校验 `lib/` 编译产物与提交一致（改了 `src` 却忘编译会失败）；
   - 跑 Python 纯逻辑单测（`encoding`/`detect`，仅需 Pillow），在 **ubuntu + macOS** 矩阵上运行。
-- **发布**：打一个 `v*` 标签（如 `v0.1.6`）推送到 GitHub，CI 在构建+测试通过后自动
+- **发布**：打一个 `v*` 标签（如 `v0.1.7`）推送到 GitHub，CI 在构建+测试通过后自动
   `npm pack` 出 `vision-<version>.tgz` 并创建 GitHub Release 上传该产物，
-  可直接 `dsh plugin add ./vision-0.1.6.tgz` 安装。
+  可直接 `dsh plugin add ./vision-0.1.7.tgz` 安装。
 
 ```bash
-git tag v0.1.6 && git push origin v0.1.6
+git tag v0.1.7 && git push origin v0.1.7
 ```
 
 ## 前提
@@ -84,10 +84,10 @@ python -m pip install -r requirements.txt
 npx -y @deepseek-ai/dsh plugin --profile web add github:cczzyy-cn/C-Vision
 ```
 
-或装**指定 tarball**（从 Release 下载 `vision-0.1.6.tgz` 后）：
+或装**指定 tarball**（从 Release 下载 `vision-0.1.7.tgz` 后）：
 
 ```powershell
-npx -y @deepseek-ai/dsh plugin --profile web add C:\Users\14339\Downloads\vision-0.1.6.tgz
+npx -y @deepseek-ai/dsh plugin --profile web add C:\Users\14339\Downloads\vision-0.1.7.tgz
 ```
 
 或装**本地目录**（已 clone 本仓库）：
@@ -98,7 +98,7 @@ npx -y @deepseek-ai/dsh plugin --profile web add C:\Users\14339\Desktop\git\C-Vi
 
 装完**重启 DSH Desktop**。用 `npx -y @deepseek-ai/dsh --dump-config` 可看到多出 `# == Vision` 配置层。
 
-> 也可 `pnpm pack` 打成 tarball 分发：`npx -y @deepseek-ai/dsh plugin --profile web add ./vision-0.1.6.tgz`（无需构建权限）。
+> 也可 `pnpm pack` 打成 tarball 分发：`npx -y @deepseek-ai/dsh plugin --profile web add ./vision-0.1.7.tgz`（无需构建权限）。
 > 若 `add` 因已存在同名 `vision` 依赖报错，先 `npx -y @deepseek-ai/dsh plugin --profile web rm vision` 再装。
 
 ## 配置（可选）
@@ -130,7 +130,22 @@ npx -y @deepseek-ai/dsh plugin --profile web add C:\Users\14339\Desktop\git\C-Vi
 - **推荐流程**：先 `list_windows()` 看有哪些窗口 → 直接 `see(window="<窗口标题>")` 抓目标窗口；
   需要整屏用 `see()`。
 
-## 目录结构
+## 电脑使用（computer-use）推荐流程
+
+把"看 → 操作 → 看"写成可复用的循环（配合上面的鼠标/键盘工具）：
+
+1. **观察**：`list_windows()` 找到目标窗口；或 `see(window="<标题>")` / `capture_tabs(port=9222, url=...)` 看清内容。
+2. **定位**：从截图读出目标的**屏幕绝对坐标 (x, y)**。
+3. **操作**：`focus_window`（需要时）→ `click(x,y)` / `double_click` / `type_text` / `press_key` / `scroll`。
+4. **确认**：再 `see` 看结果；不对就回到 2/3 重试，直到目标达成（循环）。
+
+示例（浏览器打开一个页面并看内容）：
+
+```
+focus_window("Google Chrome") → press_key("ctrl+l") → type_text("https://…") → press_key("enter") → see()  # 再看结果
+```
+
+> ⚠️ 操作会**真实移动/点击/输入**到你的鼠标键盘；务必先 `see` 确认坐标再操作，避免误触。
 
 ```
 vision/                      # 仓库根 = 插件本体
