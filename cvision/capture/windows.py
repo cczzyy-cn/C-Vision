@@ -246,6 +246,8 @@ def maximize_window(handle: int, keep_foreground: bool = True) -> None:
 
 # ── Windows Graphics Capture (WGC) 后端：抓取窗口「真实合成内容」 ──────────────
 _WGC_CACHE: bool | None = None
+# D3D 设备跨调用复用（单进程内多次抓屏提速）。CLI 每次独立进程用不到，MCP/循环采集可用。
+_WGC_DEVICE = None
 
 
 def _wgc_backend_available() -> bool:
@@ -258,6 +260,17 @@ def _wgc_backend_available() -> bool:
         except Exception:
             _WGC_CACHE = False
     return _WGC_CACHE
+
+
+def _get_wgc_device():
+    """获取（并缓存）Direct3D 设备。线程亲和：首建线程复用；跨线程失败则临时新建。"""
+    global _WGC_DEVICE
+    if _WGC_DEVICE is not None:
+        return _WGC_DEVICE
+    from winsdk.windows.ai.machinelearning import LearningModelDevice, LearningModelDeviceKind
+
+    _WGC_DEVICE = LearningModelDevice(LearningModelDeviceKind.DIRECT_X_HIGH_PERFORMANCE).direct3_d11_device
+    return _WGC_DEVICE
 
 
 def capture_window_wgc(hwnd: int, timeout: float = 4.0) -> Image.Image | None:
@@ -282,7 +295,10 @@ def capture_window_wgc(hwnd: int, timeout: float = 4.0) -> Image.Image | None:
     try:
         wr.init_apartment(wr.MTA)
         item = create_for_window(hwnd)
-        device = LearningModelDevice(LearningModelDeviceKind.DIRECT_X_HIGH_PERFORMANCE).direct3_d11_device
+        try:
+            device = _get_wgc_device()
+        except Exception:
+            device = LearningModelDevice(LearningModelDeviceKind.DIRECT_X_HIGH_PERFORMANCE).direct3_d11_device
         pool = gc.Direct3D11CaptureFramePool.create_free_threaded(
             device, DirectXPixelFormat.B8_G8_R8_A8_UINT_NORMALIZED, 1, item.size
         )

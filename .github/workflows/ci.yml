@@ -32,9 +32,13 @@ jobs:
           fi
           echo "lib/ is in sync with src/index.ts."
 
-  # Python 纯逻辑单测（detect 模块：空白帧/GPU 类检测），Linux 上可跑，无需 win32。
+  # Python 纯逻辑单测（encoding/detect：只依赖 PIL，跨平台），在 Ubuntu + macOS 都跑。
   test-py:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
 
