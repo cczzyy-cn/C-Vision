@@ -1,4 +1,6 @@
 Pillow>=12.0.0
+requests>=2.32.0
+websocket-client>=1.8.0   # 浏览器网页标签截图（CDP）
 pywin32>=311; sys_platform == 'win32'
 pyobjc-framework-Quartz>=10.0; sys_platform == 'darwin'   # macOS 后端（Quartz / CGWindowList + screencapture）
 winsdk>=1.0.0b10; sys_platform == 'win32'  # Windows Graphics Capture 后端（可选；未装则回退 PrintWindow/桌面区域抓取）

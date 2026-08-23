@@ -113,6 +113,8 @@ vision/                      # 仓库根 = 插件本体
       linux.py          #     Linux 后端（Phase 2，暂为占位）
     detect.py           #   纯逻辑判定（GPU 类/空白帧），不依赖 win32，可跨平台单测
     cli_capture.py      #   跨语言 CLI：python -m cvision.cli_capture [--list]
+    tabs.py             #   Chromium 网页标签枚举 + CDP 截图（自动切换页签）
+    cli_tabs.py         #   标签截图 CLI：python -m cvision.cli_tabs [--launch]
     encoding.py         #   PIL -> base64 data URL
   tests/
     test_detect.py      #   detect 模块纯逻辑单测（PIL only，Linux CI 可跑）
@@ -120,6 +122,21 @@ vision/                      # 仓库根 = 插件本体
 ```
 
 > 注：MCP server 相关的 `config.py`/`deepseek.py`/`server.py` 已从捆绑包移除（插件截屏无需它们，也免去了 `DEEPSEEK_API_KEY` 依赖）。
+
+## 浏览器网页标签截图（实验性）
+
+对 **Chrome/Edge 等 Chromium**，用 CDP 枚举页签、自动切换到每页并截取**页面内容**（不是浏览器窗口，与前台/遮挡无关）：
+
+- **控制已打开的浏览器**：需浏览器启动时带
+  `--remote-debugging-port=9222 --remote-allow-origins=*`（新版 Chrome 不加后者 WebSocket 会被 403 拒）。
+- 或者**新建**一个带调试端口的实例并把 URL 作为页签：
+  ```bash
+  python -m cvision.cli_tabs --launch --headless --urls https://a.com https://b.com --out tabcaps
+  # 或连接已有的：
+  python -m cvision.cli_tabs --port 9222 --out tabcaps
+  ```
+- 输出 JSON（每页签标题/URL/保存路径），截图存在 `--out` 目录。
+- 依赖：`requests`、`websocket-client`（已写入 `requirements.txt`）。
 
 ## 多平台支持
 
