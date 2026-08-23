@@ -1,6 +1,4 @@
-mcp>=1.25.0
 Pillow>=12.0.0
 pywin32>=311; sys_platform == 'win32'
-requests>=2.32.0
-python-dotenv>=1.0.1
-winsdk>=1.0.0b10  # Windows Graphics Capture 后端（可选；未装则回退 PrintWindow/桌面区域抓取）
+pyobjc-framework-Quartz>=10.0; sys_platform == 'darwin'   # macOS 后端（Quartz / CGWindowList + screencapture）
+winsdk>=1.0.0b10; sys_platform == 'win32'  # Windows Graphics Capture 后端（可选；未装则回退 PrintWindow/桌面区域抓取）

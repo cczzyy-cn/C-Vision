@@ -101,10 +101,16 @@ vision/                      # 仓库根 = 插件本体
   tsconfig.json         # TS 配置（pnpm build -> tsc）
   package.json          # 声明 dsh.bundle，files 含 lib/cvision/requirements.txt
   cordis.patch.yml      # bundle 的配置层，按包名引用
-  requirements.txt      # Python 依赖（随包分发，含可选的 winsdk）
+  requirements.txt      # Python 依赖（随包分发；Windows 含 pywin32/winsdk，macOS 含 pyobjc-Quartz）
   cvision/              # 捆绑的 Python 版 cvision（截屏实现；已裁剪为插件所需）
     __init__.py         #   包标记
-    capturer.py         #   窗口枚举 + 截图（WGC > PrintWindow > 读合成桌面区域 回退）
+    capturer.py         #   兼容层：转发到平台捕获后端（cvision.capture）
+    capture/            #   平台捕获后端（门面，按 sys.platform 选）
+      __init__.py       #     选后端并暴露 list_windows/capture_window/capture_screen
+      base.py           #     平台无关 Window + CaptureBackend 协议
+      windows.py        #     Windows 后端（WGC > PrintWindow > 读合成桌面区域 回退）
+      macos.py          #     macOS 后端（Quartz 枚举 + screencapture -l 抓窗口）
+      linux.py          #     Linux 后端（Phase 2，暂为占位）
     detect.py           #   纯逻辑判定（GPU 类/空白帧），不依赖 win32，可跨平台单测
     cli_capture.py      #   跨语言 CLI：python -m cvision.cli_capture [--list]
     encoding.py         #   PIL -> base64 data URL
@@ -115,10 +121,16 @@ vision/                      # 仓库根 = 插件本体
 
 > 注：MCP server 相关的 `config.py`/`deepseek.py`/`server.py` 已从捆绑包移除（插件截屏无需它们，也免去了 `DEEPSEEK_API_KEY` 依赖）。
 
+## 多平台支持
+
+- **Windows**：完整支持（WGC/PrintWindow/桌面区域回退），最稳。
+- **macOS**：Phase 1 已支持（`Quartz/CGWindowList` 枚举 + `screencapture -l` 抓窗口，与前台无关）；需在「系统设置 → 隐私与安全 → 屏幕录制」授权，否则标题为空/只能抓到壁纸。
+- **Linux**：Phase 2 占位（未见 `capture/linux.py` 实现前调用会 `NotImplementedError`）。
+
 ## 说明与限制
 
-- 跨语言：插件用 `child_process` 调 `python -m cvision.cli_capture`，需目标机器 Windows 桌面 + Python。
-- 截图能力：`capturer.capture_window` 依次尝试：**Windows Graphics Capture**（真实合成内容，抓 GPU/Chromium/被遮挡窗口最准，需 `winsdk`）→ `PrintWindow`（普通 GDI 窗口）→ 读合成桌面区域（兜底）。见 `cvision/capturer.py`。未装 `winsdk` 时自动跳过 WGC。
+- 跨语言：插件用 `child_process` 调 `python -m cvision.cli_capture`，需目标机器桌面 + Python（Windows 用 pywin32，macOS 用 pyobjc-Quartz）。
+- 截图能力：`capture_window` 依次尝试：**Windows Graphics Capture**（真实合成内容，抓 GPU/Chromium/被遮挡窗口最准，需 `winsdk`）→ `PrintWindow`（普通 GDI 窗口）→ 读合成桌面区域（兜底）。见 `cvision/capture/windows.py`。未装 `winsdk` 时自动跳过 WGC。
 - 附件限制：Harness attachment 单图源 ≤20MiB、单边 ≤8192px、每条消息 ≤20 张；超大屏默认 PNG/JPEG 视情况。
 - 截图尽量不打扰：**WGC 抓取不切前台、不抢焦点、默认不最大化**；仅当 WGC 失效回退到"读合成桌面区域"时才可能置前，且抓完立即还原窗口状态。
 - 插件本体（`src/index.ts` → `lib/index.js`）未在本环境端到端跑过（无 DSH 运行时）；按 `@deepseek-ai/dsh-tools` / `ctx.attachments.saveImage` 官方接口编写，需在你的 DSH Desktop 中 `dsh plugin add` + 重启后验证。
