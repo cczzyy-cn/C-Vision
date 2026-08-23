@@ -61,21 +61,32 @@ python -m pip install -r requirements.txt
 
 ## 安装（DSH Desktop）
 
-在 DSH Desktop 的终端（profile 目录）里，从插件目录执行：
+> ⚠️ `dsh` 命令通常**不在系统 PATH**（它是 npx 缓存里的 CLI），要用 **`npx -y @deepseek-ai/dsh`** 调用；
+> 且 `dsh plugin` 是 **pnpm 前向器**，需本机有 `pnpm`（`pnpm -v` 确认）。
+> `--profile web` 表示装进 **web**（浏览器面板 / 3080）profile；DSH Desktop 原生 App 用 `--profile desktop`。
+
+装**最新**（从 GitHub 源码，公开仓库免认证）：
 
 ```powershell
-dsh plugin add <此目录的绝对路径>
+npx -y @deepseek-ai/dsh plugin --profile web add github:cczzyy-cn/C-Vision
 ```
 
-例如（PowerShell）：
+或装**指定 tarball**（从 Release 下载 `vision-0.1.5.tgz` 后）：
 
 ```powershell
-dsh plugin add C:\Users\14339\Desktop\git\C-Vision\C-Vision
+npx -y @deepseek-ai/dsh plugin --profile web add C:\Users\14339\Downloads\vision-0.1.5.tgz
 ```
 
-然后**重启 DSH Desktop**。用 `dsh --dump-config` 可看到多出 `# == Vision` 配置层。
+或装**本地目录**（已 clone 本仓库）：
 
-> 也可打成 tarball 分发：`npm pack` 后在 DSH 里 `dsh plugin add ./vision-0.1.5.tgz`（无需构建权限）。
+```powershell
+npx -y @deepseek-ai/dsh plugin --profile web add C:\Users\14339\Desktop\git\C-Vision\C-Vision
+```
+
+装完**重启 DSH Desktop**。用 `npx -y @deepseek-ai/dsh --dump-config` 可看到多出 `# == Vision` 配置层。
+
+> 也可 `pnpm pack` 打成 tarball 分发：`npx -y @deepseek-ai/dsh plugin --profile web add ./vision-0.1.5.tgz`（无需构建权限）。
+> 若 `add` 因已存在同名 `vision` 依赖报错，先 `npx -y @deepseek-ai/dsh plugin --profile web rm vision` 再装。
 
 ## 配置（可选）
 
