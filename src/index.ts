@@ -86,6 +86,16 @@ function assertCvisionPresent(): void {
   }
 }
 
+/** 运行一次用户级输入（python -m cvision.cli_input <args>），失败会抛出子进程错误。 */
+async function runCliInput(args: string[], exec: { signal: AbortSignal }): Promise<void> {
+  assertCvisionPresent()
+  await execFileAsync(PYTHON, ['-m', 'cvision.cli_input', ...args], {
+    cwd: CVISION_DIR,
+    maxBuffer: 1 * 1024 * 1024,
+    signal: exec.signal,
+  })
+}
+
 export function apply(ctx: Context): void {
   ctx.tools.register(
     defineTool({
@@ -217,6 +227,119 @@ export function apply(ctx: Context): void {
         })
         const windows = JSON.parse(stdout) as Array<Record<string, JsonValue>>
         return { windows }
+      },
+    }),
+  )
+
+  // ── 用户级操作（computer-use）：鼠标/键盘/聚焦 ──────────────────────────────
+  // 用法：先 see 看清屏幕定位坐标，再用这些工具操作，再 see 确认，形成"看→操作→看"闭环。
+  const inputOut = {
+    schema: {
+      type: 'object' as const,
+      properties: { ok: { type: 'boolean' as const } },
+      additionalProperties: false as const,
+    },
+    render: (_a: unknown, v: { ok?: boolean }) => [
+      { type: 'text' as const, text: v.ok ? '已执行' : '未执行' },
+    ],
+  }
+
+  ctx.tools.register(
+    defineTool({
+      name: 'click',
+      description: '在屏幕绝对坐标 (x,y) 模拟鼠标单击。先 see 确认目标位置后再点。',
+      parameters: { x: { type: 'integer' }, y: { type: 'integer' }, button: { type: 'string', description: 'left/right/middle，默认 left' } },
+      output: inputOut,
+      timeoutMs: 30000,
+      async execute(args, exec) {
+        const cmd = ['--click', String(args.x), String(args.y)]
+        if (args.button && args.button !== 'left') cmd.push('--button', String(args.button))
+        await runCliInput(cmd, exec)
+        return { ok: true }
+      },
+    }),
+  )
+
+  ctx.tools.register(
+    defineTool({
+      name: 'double_click',
+      description: '在屏幕绝对坐标 (x,y) 模拟鼠标双击。',
+      parameters: { x: { type: 'integer' }, y: { type: 'integer' } },
+      output: inputOut,
+      timeoutMs: 30000,
+      async execute(args, exec) {
+        await runCliInput(['--double', String(args.x), String(args.y)], exec)
+        return { ok: true }
+      },
+    }),
+  )
+
+  ctx.tools.register(
+    defineTool({
+      name: 'mouse_move',
+      description: '把鼠标移到屏幕绝对坐标 (x,y)（不点击）。',
+      parameters: { x: { type: 'integer' }, y: { type: 'integer' } },
+      output: inputOut,
+      timeoutMs: 30000,
+      async execute(args, exec) {
+        await runCliInput(['--move', String(args.x), String(args.y)], exec)
+        return { ok: true }
+      },
+    }),
+  )
+
+  ctx.tools.register(
+    defineTool({
+      name: 'scroll',
+      description: '在屏幕坐标 (x,y) 处滚动。dy>0 向上滚，dy<0 向下滚（单位：格）。',
+      parameters: { x: { type: 'integer' }, y: { type: 'integer' }, dy: { type: 'integer' } },
+      output: inputOut,
+      timeoutMs: 30000,
+      async execute(args, exec) {
+        await runCliInput(['--scroll', String(args.x), String(args.y), String(args.dy)], exec)
+        return { ok: true }
+      },
+    }),
+  )
+
+  ctx.tools.register(
+    defineTool({
+      name: 'type_text',
+      description: '像键盘一样输入文本（到当前焦点）。例如输入到地址栏/输入框，可配合 ctrl+l 先聚焦。',
+      parameters: { text: { type: 'string', description: '要输入的文本' } },
+      output: inputOut,
+      timeoutMs: 30000,
+      async execute(args, exec) {
+        await runCliInput(['--type', String(args.text)], exec)
+        return { ok: true }
+      },
+    }),
+  )
+
+  ctx.tools.register(
+    defineTool({
+      name: 'press_key',
+      description: '发送快捷键/按键，如 "ctrl+l"（聚焦地址栏）、"enter"、"ctrl+shift+t"（新标签）、"alt+tab"。',
+      parameters: { keys: { type: 'string', description: '按键组合，如 ctrl+l / enter / ctrl+shift+t' } },
+      output: inputOut,
+      timeoutMs: 30000,
+      async execute(args, exec) {
+        await runCliInput(['--keys', String(args.keys)], exec)
+        return { ok: true }
+      },
+    }),
+  )
+
+  ctx.tools.register(
+    defineTool({
+      name: 'focus_window',
+      description: '把标题含子串的窗口置前（用户级：激活它），便于随后对它键盘/鼠标操作。',
+      parameters: { title: { type: 'string', description: '窗口标题子串，如 "Google Chrome"' } },
+      output: inputOut,
+      timeoutMs: 30000,
+      async execute(args, exec) {
+        await runCliInput(['--focus', String(args.title)], exec)
+        return { ok: true }
       },
     }),
   )

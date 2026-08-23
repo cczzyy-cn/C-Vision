@@ -6,14 +6,27 @@
 
 ## 工具一览
 
+### 看（观察）
 | 工具 | 说明 |
 | --- | --- |
 | `see(window?, region?, delay?, maximize?)` | 截屏/窗口 → **图片**返回（模型原生看）。`region="x,y,w,h"` 只取一块（省 token）；`delay=毫秒` 等渲染；`maximize` 默认关 |
 | `ocr(window?, region?, delay?)` | 截屏后 **OCR** → 返回**文本**（终端/网页/文档快速读字，省整图 token） |
 | `list_windows()` | 列出可见窗口（标题+句柄+尺寸） |
-| `capture_tabs(urls?/port?)` | 浏览器页签**自动切换后逐页截图**（CDP，返回多张图片） |
+| `capture_tabs(urls?/port?/url?/title?)` | 浏览器页签**自动切换后逐页截图**；`url`/`title` 可**定位单个目标页签**并只截它 |
 
-> 关键：**默认不最大化、不切前台**——WGC 抓窗口合成内容，与前台/遮挡无关。
+### 操作（computer-use，模拟用户级输入）
+| 工具 | 说明 |
+| --- | --- |
+| `click(x, y, button?)` | 屏幕绝对坐标**单击**（left/right/middle） |
+| `double_click(x, y)` | 屏幕绝对坐标**双击** |
+| `mouse_move(x, y)` | 移动鼠标到屏幕坐标（不点击） |
+| `scroll(x, y, dy)` | 在 (x,y) 处滚动（dy>0 上滚，<0 下滚） |
+| `type_text(text)` | 像键盘一样**输入文本**到当前焦点 |
+| `press_key(keys)` | 发送**快捷键**，如 `ctrl+l`、`enter`、`ctrl+shift+t`、`alt+tab` |
+| `focus_window(title)` | 按标题子串把窗口**置前**（用户级激活） |
+
+> **关键**：默认**不最大化、不切前台**——WGC 抓窗口合成内容，与前台/遮挡无关。
+> **computer-use 闭环**：`see` 看清 → `click`/`type_text`/`press_key`/`scroll` 操作 → 再 `see` 确认 …（"看→操作→看"循环）。
 
 ## 分发：自带 Python 版 cvision
 
@@ -40,12 +53,12 @@ npm run build        # 即 tsc -p tsconfig.json，重生成 lib/index.js
 - **CI**（`.github/workflows/ci.yml`）：每次 `push` / `pull_request` 自动：
   - `npm ci && npm run build`，并校验 `lib/` 编译产物与提交一致（改了 `src` 却忘编译会失败）；
   - 跑 Python 纯逻辑单测（`encoding`/`detect`，仅需 Pillow），在 **ubuntu + macOS** 矩阵上运行。
-- **发布**：打一个 `v*` 标签（如 `v0.1.5`）推送到 GitHub，CI 在构建+测试通过后自动
+- **发布**：打一个 `v*` 标签（如 `v0.1.6`）推送到 GitHub，CI 在构建+测试通过后自动
   `npm pack` 出 `vision-<version>.tgz` 并创建 GitHub Release 上传该产物，
-  可直接 `dsh plugin add ./vision-0.1.5.tgz` 安装。
+  可直接 `dsh plugin add ./vision-0.1.6.tgz` 安装。
 
 ```bash
-git tag v0.1.5 && git push origin v0.1.5
+git tag v0.1.6 && git push origin v0.1.6
 ```
 
 ## 前提
@@ -71,10 +84,10 @@ python -m pip install -r requirements.txt
 npx -y @deepseek-ai/dsh plugin --profile web add github:cczzyy-cn/C-Vision
 ```
 
-或装**指定 tarball**（从 Release 下载 `vision-0.1.5.tgz` 后）：
+或装**指定 tarball**（从 Release 下载 `vision-0.1.6.tgz` 后）：
 
 ```powershell
-npx -y @deepseek-ai/dsh plugin --profile web add C:\Users\14339\Downloads\vision-0.1.5.tgz
+npx -y @deepseek-ai/dsh plugin --profile web add C:\Users\14339\Downloads\vision-0.1.6.tgz
 ```
 
 或装**本地目录**（已 clone 本仓库）：
@@ -85,7 +98,7 @@ npx -y @deepseek-ai/dsh plugin --profile web add C:\Users\14339\Desktop\git\C-Vi
 
 装完**重启 DSH Desktop**。用 `npx -y @deepseek-ai/dsh --dump-config` 可看到多出 `# == Vision` 配置层。
 
-> 也可 `pnpm pack` 打成 tarball 分发：`npx -y @deepseek-ai/dsh plugin --profile web add ./vision-0.1.5.tgz`（无需构建权限）。
+> 也可 `pnpm pack` 打成 tarball 分发：`npx -y @deepseek-ai/dsh plugin --profile web add ./vision-0.1.6.tgz`（无需构建权限）。
 > 若 `add` 因已存在同名 `vision` 依赖报错，先 `npx -y @deepseek-ai/dsh plugin --profile web rm vision` 再装。
 
 ## 配置（可选）
