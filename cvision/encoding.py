@@ -38,3 +38,51 @@ def image_to_data_url(img: Image.Image, format: str = _DEFAULT_FORMAT) -> str:
     """将 PIL 图片编码为 ``data:<mime>;base64,<data>`` 形式的 data URL。"""
     mime, b64 = image_to_base64(img, format=format)
     return f"data:{mime};base64,{b64}"
+
+
+# Harness attachment 的图像限制（单边 <=8192px、单张 <=20MiB），超出会被拒。
+IMAGE_MAX_SIDE = 8192
+IMAGE_MAX_BYTES = 20 * 1024 * 1024
+
+
+def _encoded_size(img: Image.Image, format: str) -> int:
+    buf = io.BytesIO()
+    img.save(buf, format=format.upper())
+    return buf.tell()
+
+
+def fit_for_attachment(
+    img: Image.Image,
+    format: str = "PNG",
+    max_side: int = IMAGE_MAX_SIDE,
+    max_bytes: int = IMAGE_MAX_BYTES,
+) -> Image.Image:
+    """把图缩放在附件限制内：单边不超过 ``max_side``，编码后不超过 ``max_bytes``。
+
+    先等比例缩边，再若编码仍超限则逐步缩小，确保 ``saveImage`` 不会被拒。
+    """
+    if img is None:
+        return None  # type: ignore[return-value]
+    w, h = img.size
+    if max(w, h) > max_side:
+        scale = max_side / max(w, h)
+        img = img.resize((max(1, int(w * scale)), max(1, int(h * scale))), Image.LANCZOS)
+    for _ in range(8):
+        if _encoded_size(img, format) <= max_bytes:
+            break
+        w, h = img.size
+        if w <= 1 or h <= 1:
+            break
+        img = img.resize((max(1, int(w * 0.8)), max(1, int(h * 0.8))), Image.LANCZOS)
+    return img
+
+
+def crop_region(img: Image.Image, region: str) -> Image.Image:
+    """按 ``x,y,w,h`` 裁剪图片区域（像素，相对该图）。"""
+    try:
+        x, y, w, h = (int(v.strip()) for v in region.split(","))
+    except Exception:
+        raise ValueError("region 需为 x,y,w,h 四个整数")
+    if w <= 0 or h <= 0:
+        raise ValueError("region 宽高需为正整数")
+    return img.crop((x, y, x + w, y + h))

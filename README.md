@@ -79,6 +79,8 @@ dsh plugin add C:\Users\14339\Desktop\git\C-Vision\C-Vision
 
 - "列一下可见窗口" → `list_windows()`（先找到目标窗口）→ "用 see 看 VS Code" → `see(window="Visual Studio Code")`。
 - 直接说 "用 see 看一下屏幕" → `see()`。
+- 只看窗口内一小块 → `see(window="X", region="x,y,w,h")`；需要渲染慢的页面 → `see(..., delay=800)`。
+- 只要读文字 → `ocr(window="X")`（识别屏幕/窗口中的文本并返回，省去整图 token）。
 - 看浏览器各页签 → `capture_tabs(urls=[...])`（无头开页/逐个截图）或 `capture_tabs(port=9222)`（连已带调试参数的浏览器）。
 
 > 请遵守下面的「给 AI 智能体的使用提示」——**默认不要 `maximize`，也不要用它去切换/激活前台窗口**。
