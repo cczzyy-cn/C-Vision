@@ -77,8 +77,20 @@ dsh plugin add C:\Users\14339\Desktop\git\C-Vision\C-Vision
 
 模型选择支持图片的 `deepseek-v4-flash-vision-exp` 后：
 
-- "列一下可见窗口" → `list_windows()`（先找到目标窗口）→ "用 see 看 VS Code" → `see(window="Visual Studio Code", maximize=true)`。
+- "列一下可见窗口" → `list_windows()`（先找到目标窗口）→ "用 see 看 VS Code" → `see(window="Visual Studio Code")`。
 - 直接说 "用 see 看一下屏幕" → `see()`。
+
+> 请遵守下面的「给 AI 智能体的使用提示」——**默认不要 `maximize`，也不要用它去切换/激活前台窗口**。
+
+## 给 AI 智能体的使用提示（重要）
+
+- **默认不要传 `maximize=true`**：Windows Graphics Capture 抓的是窗口**自身的合成内容**，
+  跟窗口是否在前台、是否被其它窗口遮挡**无关**。因此**不需要**把窗口切到前台，也**不需要**最大化。
+- **不要为了截图去激活/切换前台窗口**：WGC 路径**不抢焦点、不切走你正在用的窗口**，全程无打扰。
+- **什么情况才用 `maximize=true`**：仅当窗口已**最小化**（内容很小/看不清）、或**太小**、
+  或**被其它窗口完全挡住且内容读不出来**时才用。插件抓完会**自动还原**窗口原状态。
+- **推荐流程**：先 `list_windows()` 看有哪些窗口 → 直接 `see(window="<窗口标题>")` 抓目标窗口；
+  需要整屏用 `see()`。
 
 ## 目录结构
 
@@ -108,5 +120,5 @@ vision/                      # 仓库根 = 插件本体
 - 跨语言：插件用 `child_process` 调 `python -m cvision.cli_capture`，需目标机器 Windows 桌面 + Python。
 - 截图能力：`capturer.capture_window` 依次尝试：**Windows Graphics Capture**（真实合成内容，抓 GPU/Chromium/被遮挡窗口最准，需 `winsdk`）→ `PrintWindow`（普通 GDI 窗口）→ 读合成桌面区域（兜底）。见 `cvision/capturer.py`。未装 `winsdk` 时自动跳过 WGC。
 - 附件限制：Harness attachment 单图源 ≤20MiB、单边 ≤8192px、每条消息 ≤20 张；超大屏默认 PNG/JPEG 视情况。
-- 截图后窗口**还原原状态、不抢焦点**。
+- 截图尽量不打扰：**WGC 抓取不切前台、不抢焦点、默认不最大化**；仅当 WGC 失效回退到"读合成桌面区域"时才可能置前，且抓完立即还原窗口状态。
 - 插件本体（`src/index.ts` → `lib/index.js`）未在本环境端到端跑过（无 DSH 运行时）；按 `@deepseek-ai/dsh-tools` / `ctx.attachments.saveImage` 官方接口编写，需在你的 DSH Desktop 中 `dsh plugin add` + 重启后验证。
