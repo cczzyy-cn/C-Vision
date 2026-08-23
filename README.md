@@ -1,8 +1,17 @@
 # Vision · DeepSeek Harness (DSH) 视觉插件
 
-给 DeepSeek Harness 的 agent 提供**自动视觉能力**：模型调用 `see` 工具，得到一张**真实截图（作为图片）**，从而**原生看到画面**（描述、识别截图文字、读图表/文档）。
+给 DeepSeek Harness 的 agent 提供**自动视觉能力（看）+ 用户级操作（操作）**：模型调用 `see`/`ocr`/`list_windows`
+看清屏幕/窗口，再用 `click`/`type_text`/`press_key`/`scroll`/`focus_window` 像人一样操作，形成 **看→操作→看** 的 computer-use 闭环。
 
-这是一个 **DSH 组合包（bundle）**，通过 `dsh plugin add` 安装。插件注册工具 → 跨语言调用**包内捆绑的 Python 版 cvision** 截屏/OCR → 写入 Harness 附件服务（`ctx.attachments.saveImage`）或返回文本 → 以 **`image` ContentBlock / `text`** 返回给模型。
+这是一个 **DSH 组合包（bundle）**，通过 `dsh plugin add` 安装。插件注册工具 → 跨语言调用**包内捆绑的 Python 版 cvision** 截屏/OCR/输入 → 写入 Harness 附件服务（`ctx.attachments.saveImage`）或返回文本 → 以 **`image` ContentBlock / `text`** 返回给模型。
+
+## 特性
+
+- **原生看图**：`see` 抓真实截图（WGC 抓窗口合成内容，GPU/被遮挡窗口也稳），模型直接看到。
+- **快速读字**：`ocr` 直接返回文本；`see`/`ocr` 支持 `region="x,y,w,h"` 只取一块，省 token。
+- **用户级操作**：鼠标点击/移动/滚动、键盘输入/快捷键、窗口聚焦（模拟人操作）。
+- **跨平台**：Windows（完整）/ macOS(Phase 1) / Linux(Phase 2)。
+- **开箱即用**：包内自带 Python cvision 与依赖清单，`CVISION_DIR` 默认指向包内。
 
 ## 工具一览
 
@@ -145,6 +154,20 @@ focus_window("Google Chrome") → press_key("ctrl+l") → type_text("https://…
 
 > ⚠️ 操作会**真实移动/点击/输入**到你的鼠标键盘；务必先 `see` 确认坐标再操作，避免误触。
 
+## OCR 文本识别
+
+`ocr` 工具对截屏/窗口做文字识别：
+- **Windows**：用 `Windows.Media.Ocr`（`winsdk`，系统语言包，免额外二进制）；
+- 回退：装 `pytesseract` + Tesseract 后用其识别（跨平台）。
+
+## 多平台支持
+
+- **Windows**：完整支持（WGC/PrintWindow/桌面区域回退），最稳。
+- **macOS**：Phase 1 已支持（`Quartz/CGWindowList` 枚举 + `screencapture -l` 抓窗口，与前台无关）；需在「系统设置 → 隐私与安全 → 屏幕录制」授权，否则标题为空/只能抓到壁纸。
+- **Linux**：Phase 2 占位（调用 `capture/linux.py` 会 `NotImplementedError`）。
+
+## 目录结构
+
 ```
 vision/                      # 仓库根 = 插件本体
   src/index.ts          # TypeScript 源（作者用 dsh-tools/cordis/dsh-attachment 类型）
@@ -153,7 +176,7 @@ vision/                      # 仓库根 = 插件本体
   package.json          # 声明 dsh.bundle，files 含 lib/cvision/requirements.txt
   cordis.patch.yml      # bundle 的配置层，按包名引用
   requirements.txt      # Python 依赖（随包分发；Windows 含 pywin32/winsdk，macOS 含 pyobjc-Quartz）
-  cvision/              # 捆绑的 Python 版 cvision（截屏实现；已裁剪为插件所需）
+  cvision/              # 捆绑的 Python 版 cvision（截屏 / OCR / 用户级输入；已裁剪为插件所需）
     __init__.py         #   包标记
     capturer.py         #   兼容层：转发到平台捕获后端（cvision.capture）
     capture/            #   平台捕获后端（门面，按 sys.platform 选）
@@ -165,9 +188,9 @@ vision/                      # 仓库根 = 插件本体
     detect.py           #   纯逻辑判定（GPU 类/空白帧），不依赖 win32，可跨平台单测
     encoding.py         #   PIL -> base64 data URL；crop_region；fit_for_attachment(附件缩图)
     ocr.py              #   OCR（Windows.Media.Ocr 优先 / pytesseract 回退）
+    input.py            #   用户级输入（pyautogui：点击/移动/滚动/输入/快捷键/聚焦）
     cli_capture.py      #   跨语言 CLI：python -m cvision.cli_capture [--list] [--region] [--delay]
     cli_ocr.py          #   OCR CLI：python -m cvision.cli_ocr [--window] [--region]
-    input.py            #   用户级输入（pyautogui：点击/移动/滚动/输入/快捷键/聚焦）
     cli_input.py        #   输入 CLI：python -m cvision.cli_input --click/--type/--keys/--focus ...
   tests/
     test_detect.py      #   detect 模块单测（PIL only）
@@ -177,18 +200,6 @@ vision/                      # 仓库根 = 插件本体
 
 > 注：MCP server 相关的 `config.py`/`deepseek.py`/`server.py` 已从捆绑包移除（插件截屏无需它们，也免去了 `DEEPSEEK_API_KEY` 依赖）。
 
-## OCR 文本识别
-
-`ocr` 工具对截屏/窗口做文字识别：
-- **Windows**：用 `Windows.Media.Ocr`（`winsdk`，系统语言包，免额外二进制）；
-- 回退：装 `pytesseract` + Tesseract 后用其识别（跨平台）。
-
-## 多平台支持
-
-- **Windows**：完整支持（WGC/PrintWindow/桌面区域回退），最稳。
-- **macOS**：Phase 1 已支持（`Quartz/CGWindowList` 枚举 + `screencapture -l` 抓窗口，与前台无关）；需在「系统设置 → 隐私与安全 → 屏幕录制」授权，否则标题为空/只能抓到壁纸。
-- **Linux**：Phase 2 占位（未见 `capture/linux.py` 实现前调用会 `NotImplementedError`）。
-
 ## 说明与限制
 
 - 跨语言：插件用 `child_process` 调 `python -m cvision.cli_capture`，需目标机器桌面 + Python（Windows 用 pywin32，macOS 用 pyobjc-Quartz）。
@@ -197,4 +208,5 @@ vision/                      # 仓库根 = 插件本体
 - 省 token：`see`/`ocr` 支持 `region="x,y,w,h"` 只处理一块；`ocr` 直接返回文本；超大图自动降采样。
 - 截图尽量不打扰：**WGC 抓取不切前台、不抢焦点、默认不最大化**；仅当 WGC 失效回退到"读合成桌面区域"时才可能置前，且抓完立即还原窗口状态。
 - WGC 设备复用：单进程内缓存 Direct3D 设备，多次抓屏更快（CLI 每次独立进程用不到；MCP/循环采集受益）。
-- 插件本体（`src/index.ts` → `lib/index.js`）未在本环境端到端跑过（无 DSH 运行时）；按 `@deepseek-ai/dsh-tools` / `ctx.attachments.saveImage` 官方接口编写，需在你的 DSH Desktop 中 `dsh plugin add` + 重启后验证。
+- 输入/操作类工具（`click`/`type_text` 等）依赖 `pyautogui`，会**真实操作你的鼠标键盘**；调用前请先 `see` 确认屏幕坐标。
+- 工具本体（`see`/`ocr`/`list_windows` 及输入工具）已在 DSH 会话中直接调用过；**macOS/Linux 后端**为编写实现，需在对应平台 + 权限（屏幕录制等）下验证。
