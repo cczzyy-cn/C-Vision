@@ -70,6 +70,23 @@ def close_tab(port: int, tab_id: str, host: str = "127.0.0.1") -> None:
     requests.get(f"http://{host}:{port}/json/close/{tab_id}", timeout=5)
 
 
+def find_tab(
+    port: int,
+    url_substr: str | None = None,
+    title_substr: str | None = None,
+    host: str = "127.0.0.1",
+) -> dict | None:
+    """在已打开浏览器的页签中，按 URL/标题子串定位一个目标页签。"""
+    needle_u = (url_substr or "").strip().lower()
+    needle_t = (title_substr or "").strip().lower()
+    for t in list_tabs(port, host):
+        if needle_u and needle_u in t.get("url", "").lower():
+            return t
+        if needle_t and needle_t in t.get("title", "").lower():
+            return t
+    return None
+
+
 class _CdpClient:
     """对单个 target WebSocket 的极简 CDP 客户端。"""
 

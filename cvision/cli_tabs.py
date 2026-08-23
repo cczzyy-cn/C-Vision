@@ -40,6 +40,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--browser", default="chrome", choices=["chrome", "edge"], help="--launch 用哪个浏览器")
     p.add_argument("--headless", action="store_true", help="--launch 时用无头模式")
     p.add_argument("--urls", nargs="*", default=None, help="--launch 时打开的页面（多个）")
+    p.add_argument("--url-substr", default=None, help="连接已有浏览器时，按 URL 子串定位单个目标页签并只截它")
+    p.add_argument("--title-substr", default=None, help="连接已有浏览器时，按标题子串定位单个目标页签并只截它")
     p.add_argument("--full-page", action="store_true", help="整页截图（captureBeyondViewport=true）")
     args = p.parse_args(argv)
 
@@ -67,14 +69,26 @@ def main(argv: list[str] | None = None) -> int:
         else:
             if port is None:
                 port = 9222
-            if not tabs.list_tabs(port):
+            # 有目标定位：只截命中的单个页签；否则截全部页签
+            target = args.url_substr or args.title_substr
+            if target:
+                tab = tabs.find_tab(port, url_substr=args.url_substr, title_substr=args.title_substr)
+                if tab is None:
+                    raise RuntimeError(
+                        f"未在 http://127.0.0.1:{port} 的浏览器页签中找到匹配（url={args.url_substr}, title={args.title_substr}）。"
+                        "请确认浏览器已带 --remote-debugging-port 启动，且该页已打开。"
+                    )
+                results = [tabs.capture_tab(port, tab["id"], args.out, full_page=args.full_page)]
+            elif not tabs.list_tabs(port):
                 print(
                     f"警告：未能从 http://127.0.0.1:{port} 取到页签。"
                     "Chrome/Edge 需以 --remote-debugging-port=<port> 启动；或加 --launch。",
                     file=sys.stderr,
                 )
+                results = []
+            else:
+                results = tabs.capture_all_tabs(port, args.out, full_page=args.full_page)
 
-        results = tabs.capture_all_tabs(port, args.out, full_page=args.full_page)
         sys.stdout.write(json.dumps({"tabs": results}, ensure_ascii=True, indent=2))
         return 0
     finally:
