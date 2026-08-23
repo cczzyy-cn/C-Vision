@@ -2,7 +2,18 @@
 
 给 DeepSeek Harness 的 agent 提供**自动视觉能力**：模型调用 `see` 工具，得到一张**真实截图（作为图片）**，从而**原生看到画面**（描述、识别截图文字、读图表/文档）。
 
-这是一个 **DSH 组合包（bundle）**，通过 `dsh plugin add` 安装。插件注册 `see` 工具 → 跨语言调用**包内捆绑的 Python 版 cvision** 截屏 → 写入 Harness 附件服务（`ctx.attachments.saveImage`）→ 以 **`image` ContentBlock** 返回 → 模型直接看到图片。
+这是一个 **DSH 组合包（bundle）**，通过 `dsh plugin add` 安装。插件注册工具 → 跨语言调用**包内捆绑的 Python 版 cvision** 截屏/OCR → 写入 Harness 附件服务（`ctx.attachments.saveImage`）或返回文本 → 以 **`image` ContentBlock / `text`** 返回给模型。
+
+## 工具一览
+
+| 工具 | 说明 |
+| --- | --- |
+| `see(window?, region?, delay?, maximize?)` | 截屏/窗口 → **图片**返回（模型原生看）。`region="x,y,w,h"` 只取一块（省 token）；`delay=毫秒` 等渲染；`maximize` 默认关 |
+| `ocr(window?, region?, delay?)` | 截屏后 **OCR** → 返回**文本**（终端/网页/文档快速读字，省整图 token） |
+| `list_windows()` | 列出可见窗口（标题+句柄+尺寸） |
+| `capture_tabs(urls?/port?)` | 浏览器页签**自动切换后逐页截图**（CDP，返回多张图片） |
+
+> 关键：**默认不最大化、不切前台**——WGC 抓窗口合成内容，与前台/遮挡无关。
 
 ## 分发：自带 Python 版 cvision
 
@@ -28,13 +39,13 @@ npm run build        # 即 tsc -p tsconfig.json，重生成 lib/index.js
 
 - **CI**（`.github/workflows/ci.yml`）：每次 `push` / `pull_request` 自动：
   - `npm ci && npm run build`，并校验 `lib/` 编译产物与提交一致（改了 `src` 却忘编译会失败）；
-  - 跑 Python 纯逻辑单测（`test_detect.py`，仅需 Pillow，Linux 可运行）。
-- **发布**：打一个 `v*` 标签（如 `v0.1.2`）推送到 GitHub，CI 在构建+测试通过后自动
+  - 跑 Python 纯逻辑单测（`encoding`/`detect`，仅需 Pillow），在 **ubuntu + macOS** 矩阵上运行。
+- **发布**：打一个 `v*` 标签（如 `v0.1.3`）推送到 GitHub，CI 在构建+测试通过后自动
   `npm pack` 出 `vision-<version>.tgz` 并创建 GitHub Release 上传该产物，
-  可直接 `dsh plugin add ./vision-0.1.2.tgz` 安装。
+  可直接 `dsh plugin add ./vision-0.1.3.tgz` 安装。
 
 ```bash
-git tag v0.1.2 && git push origin v0.1.2
+git tag v0.1.3 && git push origin v0.1.3
 ```
 
 ## 前提
@@ -64,7 +75,7 @@ dsh plugin add C:\Users\14339\Desktop\git\C-Vision\C-Vision
 
 然后**重启 DSH Desktop**。用 `dsh --dump-config` 可看到多出 `# == Vision` 配置层。
 
-> 也可打成 tarball 分发：`npm pack` 后在 DSH 里 `dsh plugin add ./vision-0.1.2.tgz`（无需构建权限）。
+> 也可打成 tarball 分发：`npm pack` 后在 DSH 里 `dsh plugin add ./vision-0.1.3.tgz`（无需构建权限）。
 
 ## 配置（可选）
 
@@ -115,16 +126,25 @@ vision/                      # 仓库根 = 插件本体
       macos.py          #     macOS 后端（Quartz 枚举 + screencapture -l 抓窗口）
       linux.py          #     Linux 后端（Phase 2，暂为占位）
     detect.py           #   纯逻辑判定（GPU 类/空白帧），不依赖 win32，可跨平台单测
-    cli_capture.py      #   跨语言 CLI：python -m cvision.cli_capture [--list]
+    encoding.py         #   PIL -> base64 data URL；crop_region；fit_for_attachment(附件缩图)
+    ocr.py              #   OCR（Windows.Media.Ocr 优先 / pytesseract 回退）
+    cli_capture.py      #   跨语言 CLI：python -m cvision.cli_capture [--list] [--region] [--delay]
+    cli_ocr.py          #   OCR CLI：python -m cvision.cli_ocr [--window] [--region]
     tabs.py             #   Chromium 网页标签枚举 + CDP 截图（自动切换页签）
     cli_tabs.py         #   标签截图 CLI：python -m cvision.cli_tabs [--launch]
-    encoding.py         #   PIL -> base64 data URL
   tests/
-    test_detect.py      #   detect 模块纯逻辑单测（PIL only，Linux CI 可跑）
+    test_detect.py      #   detect 模块单测（PIL only）
+    test_encoding.py    #   encoding 模块单测（dataURL/crop/fit，PIL only）
   README.md
 ```
 
 > 注：MCP server 相关的 `config.py`/`deepseek.py`/`server.py` 已从捆绑包移除（插件截屏无需它们，也免去了 `DEEPSEEK_API_KEY` 依赖）。
+
+## OCR 文本识别
+
+`ocr` 工具对截屏/窗口做文字识别：
+- **Windows**：用 `Windows.Media.Ocr`（`winsdk`，系统语言包，免额外二进制）；
+- 回退：装 `pytesseract` + Tesseract 后用其识别（跨平台）。
 
 ## 浏览器网页标签截图（实验性）
 
@@ -152,6 +172,8 @@ vision/                      # 仓库根 = 插件本体
 
 - 跨语言：插件用 `child_process` 调 `python -m cvision.cli_capture`，需目标机器桌面 + Python（Windows 用 pywin32，macOS 用 pyobjc-Quartz）。
 - 截图能力：`capture_window` 依次尝试：**Windows Graphics Capture**（真实合成内容，抓 GPU/Chromium/被遮挡窗口最准，需 `winsdk`）→ `PrintWindow`（普通 GDI 窗口）→ 读合成桌面区域（兜底）。见 `cvision/capture/windows.py`。未装 `winsdk` 时自动跳过 WGC。
-- 附件限制：Harness attachment 单图源 ≤20MiB、单边 ≤8192px、每条消息 ≤20 张；超大屏默认 PNG/JPEG 视情况。
+- 附件限制：Harness attachment 单图源 ≤20MiB、单边 ≤8192px、每条消息 ≤20 张；截图输出前会自动缩放到限制内（`encoding.fit_for_attachment`），超大屏也不会被拒。
+- 省 token：`see`/`ocr` 支持 `region="x,y,w,h"` 只处理一块；`ocr` 直接返回文本；超大图自动降采样。
 - 截图尽量不打扰：**WGC 抓取不切前台、不抢焦点、默认不最大化**；仅当 WGC 失效回退到"读合成桌面区域"时才可能置前，且抓完立即还原窗口状态。
+- WGC 设备复用：单进程内缓存 Direct3D 设备，多次抓屏更快（CLI 每次独立进程用不到；MCP/循环采集受益）。
 - 插件本体（`src/index.ts` → `lib/index.js`）未在本环境端到端跑过（无 DSH 运行时）；按 `@deepseek-ai/dsh-tools` / `ctx.attachments.saveImage` 官方接口编写，需在你的 DSH Desktop 中 `dsh plugin add` + 重启后验证。
