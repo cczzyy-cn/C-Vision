@@ -12,7 +12,6 @@
 | `see(window?, region?, delay?, maximize?)` | 截屏/窗口 → **图片**返回（模型原生看）。`region="x,y,w,h"` 只取一块（省 token）；`delay=毫秒` 等渲染；`maximize` 默认关 |
 | `ocr(window?, region?, delay?)` | 截屏后 **OCR** → 返回**文本**（终端/网页/文档快速读字，省整图 token） |
 | `list_windows()` | 列出可见窗口（标题+句柄+尺寸） |
-| `capture_tabs(urls?/port?/url?/title?)` | 浏览器页签**自动切换后逐页截图**；`url`/`title` 可**定位单个目标页签**并只截它 |
 
 ### 操作（computer-use，模拟用户级输入）
 | 工具 | 说明 |
@@ -116,7 +115,6 @@ npx -y @deepseek-ai/dsh plugin --profile web add C:\Users\14339\Desktop\git\C-Vi
 - 直接说 "用 see 看一下屏幕" → `see()`。
 - 只看窗口内一小块 → `see(window="X", region="x,y,w,h")`；需要渲染慢的页面 → `see(..., delay=800)`。
 - 只要读文字 → `ocr(window="X")`（识别屏幕/窗口中的文本并返回，省去整图 token）。
-- 看浏览器各页签 → `capture_tabs(urls=[...])`（无头开页/逐个截图）或 `capture_tabs(port=9222)`（连已带调试参数的浏览器）。
 
 > 请遵守下面的「给 AI 智能体的使用提示」——**默认不要 `maximize`，也不要用它去切换/激活前台窗口**。
 
@@ -134,7 +132,7 @@ npx -y @deepseek-ai/dsh plugin --profile web add C:\Users\14339\Desktop\git\C-Vi
 
 把"看 → 操作 → 看"写成可复用的循环（配合上面的鼠标/键盘工具）：
 
-1. **观察**：`list_windows()` 找到目标窗口；或 `see(window="<标题>")` / `capture_tabs(port=9222, url=...)` 看清内容。
+1. **观察**：`list_windows()` 找到目标窗口；或 `see(window="<标题>")` 看清内容。
 2. **定位**：从截图读出目标的**屏幕绝对坐标 (x, y)**。
 3. **操作**：`focus_window`（需要时）→ `click(x,y)` / `double_click` / `type_text` / `press_key` / `scroll`。
 4. **确认**：再 `see` 看结果；不对就回到 2/3 重试，直到目标达成（循环）。
@@ -169,8 +167,8 @@ vision/                      # 仓库根 = 插件本体
     ocr.py              #   OCR（Windows.Media.Ocr 优先 / pytesseract 回退）
     cli_capture.py      #   跨语言 CLI：python -m cvision.cli_capture [--list] [--region] [--delay]
     cli_ocr.py          #   OCR CLI：python -m cvision.cli_ocr [--window] [--region]
-    tabs.py             #   Chromium 网页标签枚举 + CDP 截图（自动切换页签）
-    cli_tabs.py         #   标签截图 CLI：python -m cvision.cli_tabs [--launch]
+    input.py            #   用户级输入（pyautogui：点击/移动/滚动/输入/快捷键/聚焦）
+    cli_input.py        #   输入 CLI：python -m cvision.cli_input --click/--type/--keys/--focus ...
   tests/
     test_detect.py      #   detect 模块单测（PIL only）
     test_encoding.py    #   encoding 模块单测（dataURL/crop/fit，PIL only）

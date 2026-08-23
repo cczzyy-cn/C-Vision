@@ -1,6 +1,4 @@
 Pillow>=12.0.0
-requests>=2.32.0
-websocket-client>=1.8.0   # 浏览器网页标签截图（CDP）
 pyautogui>=0.9.54  # 用户级输入（鼠标/键盘）
 pywin32>=311; sys_platform == 'win32'
 pyobjc-framework-Quartz>=10.0; sys_platform == 'darwin'   # macOS 后端（Quartz / CGWindowList + screencapture）
