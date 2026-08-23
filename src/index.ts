@@ -256,13 +256,16 @@ export function apply(ctx: Context): void {
       timeoutMs: 120000,
       async execute(args, exec) {
         assertCvisionPresent()
-        const port = args.port ?? 9222
         const outDir = join(tmpdir(), `vision-tabs-${Date.now()}`)
-        const cmdArgs = ['-m', 'cvision.cli_tabs', '--port', String(port), '--out', outDir]
-        if (args.full_page) cmdArgs.push('--full-page')
+        const cmdArgs = ['-m', 'cvision.cli_tabs']
+        // urls 模式=启动无头浏览器(让 CLI 自动挑空闲端口，避免 9222 冲突/残留)；否则连接已有端口的浏览器
         if (args.urls && args.urls.length > 0) {
           cmdArgs.push('--launch', '--headless', '--urls', ...args.urls)
+        } else {
+          cmdArgs.push('--port', String(args.port ?? 9222))
         }
+        if (args.full_page) cmdArgs.push('--full-page')
+        cmdArgs.push('--out', outDir)
 
         const { stdout } = await execFileAsync(PYTHON, cmdArgs, {
           cwd: CVISION_DIR,

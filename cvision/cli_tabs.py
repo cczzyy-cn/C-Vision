@@ -5,9 +5,9 @@
     python -m cvision.cli_tabs --port 9222 --out tabcaps
     python -m cvision.cli_tabs --launch --urls https://a.com https://b.com --headless --out tabcaps
 
-- 无 ``--launch`` 时连接**已运行**的 Chromium（需 ``--remote-debugging-port=9222``）。
+- 无 ``--launch`` 时连接**已运行**的 Chromium（需 ``--remote-debugging-port=<port>``）。
 - ``--launch`` 时新建一个带调试端口的 Chrome/Edge（可用 ``--urls`` 提供页签），
-  截图后会自动关闭该进程。
+  截图后会自动关闭该进程。此时若未显式给 ``--port``，会自动挑一个空闲端口以避免冲突。
 输出 JSON（每个页签的标题/URL/保存路径）。
 """
 
@@ -15,14 +15,26 @@ from __future__ import annotations
 
 import argparse
 import json
+import socket
 import sys
+import time
 
 from cvision import tabs
 
 
+def _free_port() -> int:
+    """挑一个空闲端口（绑定 0 由系统分配）。"""
+    s = socket.socket()
+    try:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+    finally:
+        s.close()
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="浏览器网页标签自动切换后截图（Chromium via CDP）")
-    p.add_argument("--port", type=int, default=9222, help="CDP 调试端口（默认 9222）")
+    p.add_argument("--port", type=int, default=None, help="CDP 调试端口；--launch 时留空则自动挑空闲端口")
     p.add_argument("--out", default="tabcaps", help="截图保存目录（默认 tabcaps）")
     p.add_argument("--launch", action="store_true", help="新建一个带调试端口的浏览器实例")
     p.add_argument("--browser", default="chrome", choices=["chrome", "edge"], help="--launch 用哪个浏览器")
@@ -31,20 +43,38 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--full-page", action="store_true", help="整页截图（captureBeyondViewport=true）")
     args = p.parse_args(argv)
 
+    port = args.port
     proc = None
     try:
         if args.launch:
-            proc = tabs.launch_browser(port=args.port, urls=args.urls, browser=args.browser, headless=args.headless)
-            if not tabs.wait_ready(args.port):
-                raise RuntimeError("浏览器调试端口未就绪")
-        elif not tabs.list_tabs(args.port):
-            print(
-                f"警告：未能从 http://127.0.0.1:{args.port} 取到页签。"
-                "Chrome/Edge 需以 --remote-debugging-port=<port> 启动；或加 --launch。",
-                file=sys.stderr,
-            )
+            if port is None:
+                port = _free_port()
+            # 无头 Chrome 不支持命令行多 target：这里只以 about:blank 启动，再用 CDP 逐个开 URL
+            proc = tabs.launch_browser(port=port, browser=args.browser, headless=args.headless)
+            if not tabs.wait_ready(port, timeout=25):
+                raise RuntimeError("浏览器调试端口未就绪（--launch 时若反复失败，可先清理残留 chrome 进程）")
+            if args.urls:
+                for u in args.urls:
+                    tabs.new_tab(port, u)
+                time.sleep(1.0)  # 给新页签一点加载时间
+                # 关掉初始 about:blank，避免多出一张空白图
+                for t in tabs.list_tabs(port):
+                    if t.get("url", "").startswith("about:blank"):
+                        try:
+                            tabs.close_tab(port, t["id"])
+                        except Exception:
+                            pass
+        else:
+            if port is None:
+                port = 9222
+            if not tabs.list_tabs(port):
+                print(
+                    f"警告：未能从 http://127.0.0.1:{port} 取到页签。"
+                    "Chrome/Edge 需以 --remote-debugging-port=<port> 启动；或加 --launch。",
+                    file=sys.stderr,
+                )
 
-        results = tabs.capture_all_tabs(args.port, args.out, full_page=args.full_page)
+        results = tabs.capture_all_tabs(port, args.out, full_page=args.full_page)
         sys.stdout.write(json.dumps({"tabs": results}, ensure_ascii=True, indent=2))
         return 0
     finally:

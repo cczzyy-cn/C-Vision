@@ -65,6 +65,11 @@ def new_tab(port: int, url: str, host: str = "127.0.0.1") -> str:
     return r.json().get("id")
 
 
+def close_tab(port: int, tab_id: str, host: str = "127.0.0.1") -> None:
+    """用 CDP ``/json/close`` 关闭一个页签。"""
+    requests.get(f"http://{host}:{port}/json/close/{tab_id}", timeout=5)
+
+
 class _CdpClient:
     """对单个 target WebSocket 的极简 CDP 客户端。"""
 
