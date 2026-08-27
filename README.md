@@ -61,12 +61,12 @@ npm run build        # 即 tsc -p tsconfig.json，重生成 lib/index.js
 - **CI**（`.github/workflows/ci.yml`）：每次 `push` / `pull_request` 自动：
   - `npm ci && npm run build`，并校验 `lib/` 编译产物与提交一致（改了 `src` 却忘编译会失败）；
   - 跑 Python 纯逻辑单测（`encoding`/`detect`，仅需 Pillow），在 **ubuntu + macOS** 矩阵上运行。
-- **发布**：打一个 `v*` 标签（如 `v0.1.8`）推送到 GitHub，CI 在构建+测试通过后自动
+- **发布**：打一个 `v*` 标签（如 `v0.1.9`）推送到 GitHub，CI 在构建+测试通过后自动
   `npm pack` 出 `vision-<version>.tgz` 并创建 GitHub Release 上传该产物，
-  可直接 `dsh plugin add ./vision-0.1.8.tgz` 安装。
+  可直接 `dsh plugin add ./vision-0.1.9.tgz` 安装。
 
 ```bash
-git tag v0.1.8 && git push origin v0.1.8
+git tag v0.1.9 && git push origin v0.1.9
 ```
 
 ## 前提
@@ -92,10 +92,10 @@ python -m pip install -r requirements.txt
 npx -y @deepseek-ai/dsh plugin --profile web add github:cczzyy-cn/C-Vision
 ```
 
-或装**指定 tarball**（从 Release 下载 `vision-0.1.8.tgz` 后）：
+或装**指定 tarball**（从 Release 下载 `vision-0.1.9.tgz` 后）：
 
 ```powershell
-npx -y @deepseek-ai/dsh plugin --profile web add C:\Users\14339\Downloads\vision-0.1.8.tgz
+npx -y @deepseek-ai/dsh plugin --profile web add C:\Users\14339\Downloads\vision-0.1.9.tgz
 ```
 
 或装**本地目录**（已 clone 本仓库）：
@@ -106,7 +106,7 @@ npx -y @deepseek-ai/dsh plugin --profile web add C:\Users\14339\Desktop\git\C-Vi
 
 装完**重启 DSH Desktop**。用 `npx -y @deepseek-ai/dsh --dump-config` 可看到多出 `# == Vision` 配置层。
 
-> 也可 `pnpm pack` 打成 tarball 分发：`npx -y @deepseek-ai/dsh plugin --profile web add ./vision-0.1.8.tgz`（无需构建权限）。
+> 也可 `pnpm pack` 打成 tarball 分发：`npx -y @deepseek-ai/dsh plugin --profile web add ./vision-0.1.9.tgz`（无需构建权限）。
 > 若 `add` 因已存在同名 `vision` 依赖报错，先 `npx -y @deepseek-ai/dsh plugin --profile web rm vision` 再装。
 
 ## 配置（可选）

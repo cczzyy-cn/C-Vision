@@ -17,7 +17,7 @@ import tempfile
 
 from PIL import Image, ImageGrab
 
-from cvision.capture.base import Window
+from cvision.capture.base import Window, pick_window
 
 try:
     import Quartz
@@ -58,11 +58,8 @@ def list_windows() -> list[Window]:
 
 
 def find_window(title_substr: str) -> Window | None:
-    needle = title_substr.strip().lower()
-    for w in list_windows():
-        if needle in w.title.lower():
-            return w
-    return None
+    """按标题定位窗口：精确标题优先，其次子串；无命中返回 None。"""
+    return pick_window(list_windows(), title_substr)
 
 
 def _unminimize(window_id: int) -> None:

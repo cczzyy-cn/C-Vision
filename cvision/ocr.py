@@ -24,7 +24,9 @@ def _ocr_via_windows(img: Image.Image) -> dict:
     if engine is None:
         raise RuntimeError("Windows OCR 没有可用的识别语言")
 
-    tmp = tempfile.mktemp(suffix=".png")
+    # 用安全临时文件（NamedTemporaryFile，避免 mktemp 的可预测路径 / TOCTOU 风险）
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as _tmp:
+        tmp = _tmp.name
     img.save(tmp)
     try:
         async def _go():

@@ -17,7 +17,7 @@ import win32gui
 import win32ui
 from PIL import Image, ImageGrab
 
-from cvision.capture.base import Window
+from cvision.capture.base import Window, pick_window
 from cvision.detect import (
     GPU_WINDOW_CLASS_PREFIXES as _GPU_WINDOW_CLASS_PREFIXES,
     is_blank_image as _is_blank_image,
@@ -65,8 +65,8 @@ def _safe_get_window_rect(hwnd: int) -> tuple[int, int, int, int] | None:
     return (left, top, right, bottom)
 
 
-def list_windows() -> list[Window]:
-    """枚举所有可见顶层窗口，按左上角排序。"""
+def _enum_all_windows() -> list[Window]:
+    """枚举所有可见顶层窗口（含最小化/工具窗口），按左上角排序。"""
     _set_dpi_aware()
     result: list[Window] = []
 
@@ -85,13 +85,18 @@ def list_windows() -> list[Window]:
     return result
 
 
+def list_windows() -> list[Window]:
+    """枚举可见顶层窗口（供模型列出）。保留最小化/工具窗口：它们可能是用户要精确抓取/恢复的对象
+    （如最小化的微信主窗，可先 ``maximize`` 再抓）；最小化窗口的矩形是 Windows 的负占位值，仅作参考。"""
+    return _enum_all_windows()
+
+
 def find_window(title_substr: str) -> Window | None:
-    """按标题子串（忽略大小写）查找第一个可见窗口。"""
-    needle = title_substr.strip().lower()
-    for w in list_windows():
-        if needle in w.title.lower():
-            return w
-    return None
+    """按标题定位窗口：精确标题优先，其次子串；无命中返回 None。
+
+    在**所有**可见窗口（含最小化）里找，以便对最小化窗口也能按标题恢复后再抓。
+    """
+    return pick_window(_enum_all_windows(), title_substr)
 
 
 def _grab_rect(left: int, top: int, right: int, bottom: int) -> Image.Image:
@@ -262,14 +267,25 @@ def _wgc_backend_available() -> bool:
     return _WGC_CACHE
 
 
+def _new_wgc_device():
+    """构造一个用于 Windows Graphics Capture 的 Direct3D 设备。
+
+    说明：winsdk 未直接暴露 D3D11CreateDevice，社区通行做法是借
+    ``LearningModelDevice(DIRECT_X_HIGH_PERFORMANCE)`` 的 ``direct3_d11_device``
+    拿一个 D3D11 设备（WGC 的 ``Direct3D11CaptureFramePool`` 需要）。这是文档化的
+    变通手段，对 D3D11 设备是否来自 ML 命名空间不敏感。
+    """
+    from winsdk.windows.ai.machinelearning import LearningModelDevice, LearningModelDeviceKind
+
+    return LearningModelDevice(LearningModelDeviceKind.DIRECT_X_HIGH_PERFORMANCE).direct3_d11_device
+
+
 def _get_wgc_device():
-    """获取（并缓存）Direct3D 设备。线程亲和：首建线程复用；跨线程失败则临时新建。"""
+    """获取（并缓存，仅成功时缓存）Direct3D 设备。多次抓屏复用同一设备更快。"""
     global _WGC_DEVICE
     if _WGC_DEVICE is not None:
         return _WGC_DEVICE
-    from winsdk.windows.ai.machinelearning import LearningModelDevice, LearningModelDeviceKind
-
-    _WGC_DEVICE = LearningModelDevice(LearningModelDeviceKind.DIRECT_X_HIGH_PERFORMANCE).direct3_d11_device
+    _WGC_DEVICE = _new_wgc_device()
     return _WGC_DEVICE
 
 
@@ -298,7 +314,7 @@ def capture_window_wgc(hwnd: int, timeout: float = 4.0) -> Image.Image | None:
         try:
             device = _get_wgc_device()
         except Exception:
-            device = LearningModelDevice(LearningModelDeviceKind.DIRECT_X_HIGH_PERFORMANCE).direct3_d11_device
+            device = _new_wgc_device()
         pool = gc.Direct3D11CaptureFramePool.create_free_threaded(
             device, DirectXPixelFormat.B8_G8_R8_A8_UINT_NORMALIZED, 1, item.size
         )
@@ -371,7 +387,9 @@ def capture_window(
 
         if _wgc_backend_available():
             wgc_img = capture_window_wgc(handle)
-            if wgc_img is not None:
+            # WGC 对某些合成/工具窗口会返回"纯黑空帧"（如微信的 Qt 工具窗），
+            # 不能仅凭非 None 就信任；空白帧要回退到 PrintWindow/桌面区域抓取。
+            if wgc_img is not None and not _is_blank_image(wgc_img):
                 return wgc_img
 
         if _is_gpu_composited_window(handle):

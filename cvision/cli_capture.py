@@ -29,7 +29,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--maximize", action="store_true", help="先最大化目标窗口再截")
     parser.add_argument("--region", default=None, help="裁剪区域 x,y,w,h（像素，相对截图）")
     parser.add_argument("--delay", type=float, default=0, help="抓取前等待毫秒")
-    parser.add_argument("--format", default="JPEG", help="JPEG/PNG/WEBP/GIF，默认 JPEG")
+    parser.add_argument("--format", default="PNG", help="JPEG/PNG/WEBP/GIF，默认 PNG（与插件 see 工具一致）")
     args = parser.parse_args(argv)
 
     if args.list:

@@ -9,13 +9,14 @@ from __future__ import annotations
 from PIL import Image
 
 # 已知用 GPU/合成渲染、PrintWindow 抓不到（或只抓到部分帧）的窗口类名前缀。
+# 注意：不要加过于宽泛的前缀（如 "Qt"）——Qt 窗口里既有合成渲染也有普通 GDI 渲染，
+# 是否走 GPU/DirectComposition 应由 windows._gpu_window_ext_style(WS_EX_NOREDIRECTIONBITMAP) 精确判断。
 GPU_WINDOW_CLASS_PREFIXES = (
     "OrpheusBrowserHost",   # 网易云音乐（Chromium 宿主）
     "Chrome_WidgetWin",     # Chrome/Electron
     "Electron",
     "CefBrowserWindow",     # CEF
     "ApplicationFrameWindow",  # UWP/WinUI
-    "Qt",                   # Qt 部分版本用合成渲染
     "UnityWndClass",        # Unity 游戏窗口
 )
 

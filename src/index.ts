@@ -97,11 +97,12 @@ export function apply(ctx: Context): void {
       name: 'see',
       description:
         '截取整个屏幕或某个窗口，并把截图以图片形式返回，让模型直接查看画面内容（描述、识别截图文字、读取图表/文档）。' +
-        '用 window 指定窗口标题子串（如 "Visual Studio Code"），留空则截全屏。' +
+        '用 window 指定窗口标题子串（如 "Visual Studio Code"），或用 handle 传入 list_windows 给出的精确句柄（更可靠，避免标题撞车）；留空则截全屏。' +
         '默认尽量别传 maximize=true：非最小化窗口会直接抓到其真实内容，且不切换前台、不抢焦点。' +
         '仅当窗口已最小化/太小/被遮挡看不清时才用 maximize=true（截图后会自动还原原状态）。',
       parameters: {
         window: { type: 'string', description: '窗口标题子串（忽略大小写）；留空则截整屏' },
+        handle: { type: 'integer', description: '窗口句柄（来自 list_windows），比 window 更精确；与 window 二选一，优先 handle' },
         maximize: {
           type: 'boolean',
           description: '是否先最大化目标窗口再截图。默认 false：非最小化窗口无需最大化且不切前台；仅当窗口太小/被遮挡看不清时设 true（抓后还原）',
@@ -125,6 +126,7 @@ export function apply(ctx: Context): void {
         assertCvisionPresent()
         const format = (args.format ?? 'PNG').toUpperCase()
         const cmdArgs = ['-m', 'cvision.cli_capture', '--format', format]
+        if (args.handle != null) cmdArgs.push('--handle', String(args.handle))
         if (args.window) cmdArgs.push('--window', String(args.window))
         if (args.maximize) cmdArgs.push('--maximize')
         if (args.region) cmdArgs.push('--region', String(args.region))
@@ -158,6 +160,7 @@ export function apply(ctx: Context): void {
         '参数同 see（window/title/maximize/region/delay）。',
       parameters: {
         window: { type: 'string', description: '窗口标题子串；留空则对整屏 OCR' },
+        handle: { type: 'integer', description: '窗口句柄（来自 list_windows），比 window 更精确；与 window 二选一，优先 handle' },
         maximize: { type: 'boolean', description: '是否先最大化目标窗口再截（抓后还原）' },
         region: { type: 'string', description: '裁剪区域 x,y,w,h（像素，相对截图）' },
         delay: { type: 'number', description: '抓取前等待毫秒，可选' },
@@ -171,12 +174,17 @@ export function apply(ctx: Context): void {
           },
           additionalProperties: false,
         },
-        render: (_args, value) => [{ type: 'text', text: String(value.text ?? '') }],
+        render: (_args, value) => {
+          const text = String(value.text ?? '')
+          const lines = Array.isArray(value.lines) ? (value.lines as string[]).filter(Boolean) : []
+          return [{ type: 'text', text: lines.length > 1 ? lines.join('\n') : text }]
+        },
       },
       timeoutMs: 90000,
       async execute(args, exec) {
         assertCvisionPresent()
         const cmdArgs = ['-m', 'cvision.cli_ocr']
+        if (args.handle != null) cmdArgs.push('--handle', String(args.handle))
         if (args.window) cmdArgs.push('--window', String(args.window))
         if (args.maximize) cmdArgs.push('--maximize')
         if (args.region) cmdArgs.push('--region', String(args.region))
@@ -328,12 +336,19 @@ export function apply(ctx: Context): void {
   ctx.tools.register(
     defineTool({
       name: 'focus_window',
-      description: '把标题含子串的窗口置前（用户级：激活它），便于随后对它键盘/鼠标操作。',
-      parameters: { title: { type: 'string', description: '窗口标题子串，如 "Google Chrome"' } },
+      description: '把指定窗口置前（用户级：激活它），便于随后对它键盘/鼠标操作。用 handle 精确（来自 list_windows），或用 title 按标题（精确标题优先）。',
+      parameters: {
+        title: { type: 'string', description: '窗口标题子串，如 "Google Chrome"；与 handle 二选一' },
+        handle: { type: 'integer', description: '窗口句柄（来自 list_windows）；与 title 二选一，优先 handle' },
+      },
       output: inputOut,
       timeoutMs: 30000,
       async execute(args, exec) {
-        await runCliInput(['--focus', String(args.title)], exec)
+        if (args.handle == null && !args.title) {
+          throw new Error('focus_window 需要提供 handle（窗口句柄）或 title（窗口标题）之一')
+        }
+        const cmd = args.handle != null ? ['--focus-handle', String(args.handle)] : ['--focus', String(args.title)]
+        await runCliInput(cmd, exec)
         return { ok: true }
       },
     }),

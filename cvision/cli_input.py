@@ -24,7 +24,8 @@ from cvision import input as inp
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="模拟用户级输入（鼠标/键盘/聚焦）")
-    p.add_argument("--focus", default=None, help="按标题子串把窗口置前")
+    p.add_argument("--focus", default=None, help="按标题子串把窗口置前（精确标题优先）")
+    p.add_argument("--focus-handle", type=int, default=None, help="按窗口句柄把窗口置前")
     p.add_argument("--click", nargs=2, type=int, metavar=("X", "Y"), help="鼠标单击屏幕坐标(绝对像素)")
     p.add_argument("--button", default="left", choices=["left", "right", "middle"])
     p.add_argument("--double", nargs=2, type=int, metavar=("X", "Y"), help="鼠标双击")
@@ -34,8 +35,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--keys", default=None, help="发送快捷键，如 ctrl+l / enter / ctrl+shift+t")
     args = p.parse_args(argv)
 
-    if args.focus:
-        inp.focus_window(args.focus)
+    if args.focus_handle is not None:
+        inp.focus_window(handle=args.focus_handle)
+    elif args.focus:
+        inp.focus_window(title_substr=args.focus)
     elif args.click:
         inp.click(args.click[0], args.click[1], button=args.button)
     elif args.double:
