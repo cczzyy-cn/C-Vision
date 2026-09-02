@@ -210,3 +210,36 @@ vision/                      # 仓库根 = 插件本体
 - WGC 设备复用：单进程内缓存 Direct3D 设备，多次抓屏更快（CLI 每次独立进程用不到；MCP/循环采集受益）。
 - 输入/操作类工具（`click`/`type_text` 等）依赖 `pyautogui`，会**真实操作你的鼠标键盘**；调用前请先 `see` 确认屏幕坐标。
 - 工具本体（`see`/`ocr`/`list_windows` 及输入工具）已在 DSH 会话中直接调用过；**macOS/Linux 后端**为编写实现，需在对应平台 + 权限（屏幕录制等）下验证。
+
+---
+
+## DSH STORE 上架契约
+
+### 依赖
+- **Node 运行时**：无 npm 运行时依赖（`dependencies` 为空）。
+- **内置组件**：包内捆绑 **Python 版 cvision**（`cvision/**/*.py`）+ 依赖清单 `requirements.txt`；
+  运行时跨语言调用该 Python 子进程做截屏/OCR/输入，`CVISION_DIR` 默认指向包内。这是本插件唯一的
+  独立供应链面，由 DSH STORE 供应链复查把关。
+- **Peer**：无（宿主通过 `ctx.tools`/`ctx.attachments` 协作注入）。
+
+### 权限说明（真实高权限）
+- 通过**跨语言 spawn 包内 Python cvision** 子进程（`child_process`/进程管理）。
+- **用户级操作**：屏幕截图、OCR、鼠标点击/移动/滚动、键盘输入/快捷键、窗口聚焦——属于**设备级输入/捕获权限**。
+- 把截图写入 Harness 附件服务 `ctx.attachments.saveImage`（由宿主代为落盘），或返回文本。
+- 这些是插件正常工作所需的**真实高权限**，DSH STORE 会将其作为 **user-reviewed/guarded** 对待。
+
+### 外部服务
+- **无出站网络**：所有捕获/OCR/输入均在本地（Windows 完整；macOS Phase 1 / Linux Phase 2）。
+
+### 失败边界
+- 包内 Python `cvision` 缺失或 `requirements.txt` 依赖未安装 → `see`/`ocr`/`click` 等工具报错或禁用。
+- 系统级屏幕捕获/权限被拒、被遮挡窗口、无窗口 → 对应工具返回失败（不影响宿主主流程）。
+- 跨平台支持不完整（macOS/Linux 为 Phase 1/2），在未支持平台上报错的边界由各工具显式给出。
+
+### 一次性 Profile 安装-启动-卸载证据
+```bash
+dsh plugin --profile tmp add github:cczzyy-cn/c-vision   # 作为 bundle 自动挂载
+dsh profile start tmp &      # 加载 `vision` bundle，注册 see/ocr/click 等工具
+dsh plugin --profile tmp rm vision
+dsh profile stop tmp         # 干净退出，无残留
+```
