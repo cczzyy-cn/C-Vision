@@ -52,6 +52,9 @@ const PLUGIN_DIR = findPluginRoot()
 const PYTHON = process.env.CVISION_PYTHON ?? 'python'
 const CVISION_DIR = process.env.CVISION_DIR || PLUGIN_DIR
 
+/** Python 子进程一律强制 UTF-8 stdio，避免 Windows 控制台/ANSI 代码页把中文窗口标题与 OCR 输出弄乱。 */
+const PY_ENV = { ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' }
+
 /** 解析 `data:<mime>;base64,<data>` 为附件服务所需的字节与媒体类型。 */
 function parseDataUrl(dataUrl: string): { data: Uint8Array; mediaType: MediaType; ext: string } {
   const m = /^data:(image\/[a-z+]+);base64,(.+)$/s.exec(String(dataUrl).trim())
@@ -82,6 +85,7 @@ async function runCliInput(args: string[], exec: { signal: AbortSignal }): Promi
   assertCvisionPresent()
   await execFileAsync(PYTHON, ['-m', 'cvision.cli_input', ...args], {
     cwd: CVISION_DIR,
+    env: PY_ENV,
     maxBuffer: 1 * 1024 * 1024,
     signal: exec.signal,
   })
@@ -92,6 +96,7 @@ async function runCliCapture(args: string[], exec: { signal: AbortSignal }): Pro
   assertCvisionPresent()
   const { stdout } = await execFileAsync(PYTHON, ['-m', 'cvision.cli_capture', ...args], {
     cwd: CVISION_DIR,
+    env: PY_ENV,
     maxBuffer: 64 * 1024 * 1024,
     signal: exec.signal,
   })
@@ -119,6 +124,7 @@ class CvisionServer {
     if (this.child) return
     const child = spawn(PYTHON, ['-m', 'cvision.cli_server'], {
       cwd: CVISION_DIR,
+      env: PY_ENV,
       stdio: ['pipe', 'pipe', 'pipe'],
     })
     this.child = child
@@ -265,6 +271,7 @@ export function apply(ctx: Context): void {
       if (args.delay) cli.push('--delay', String(args.delay))
       const { stdout } = await execFileAsync(PYTHON, ['-m', 'cvision.cli_ocr', ...cli], {
         cwd: CVISION_DIR,
+        env: PY_ENV,
         maxBuffer: 4 * 1024 * 1024,
         signal: exec.signal,
       })
@@ -686,6 +693,7 @@ export function apply(ctx: Context): void {
       async execute(_args, exec) {
         const { stdout } = await execFileAsync(PYTHON, ['-m', 'cvision.cli_input', '--get-clipboard'], {
           cwd: CVISION_DIR,
+          env: PY_ENV,
           maxBuffer: 4 * 1024 * 1024,
           signal: exec.signal,
         })
