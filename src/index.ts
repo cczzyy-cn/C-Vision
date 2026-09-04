@@ -342,6 +342,10 @@ export function apply(ctx: Context): void {
           ]
           const text = String((value as any).text ?? '')
           if (text) blocks.push({ type: 'text', text })
+          const words = Array.isArray((value as any).words) ? ((value as any).words as Row[]) : []
+          if (words.length) {
+            blocks.push({ type: 'text', text: '\nword_boxes (x,y,w,h):\n' + JSON.stringify(words, null, 2) })
+          }
           return blocks as any
         },
       },
@@ -398,7 +402,14 @@ export function apply(ctx: Context): void {
         render: (_args, value) => {
           const text = String(value.text ?? '')
           const lines = Array.isArray(value.lines) ? (value.lines as string[]).filter(Boolean) : []
-          return [{ type: 'text', text: lines.length > 1 ? lines.join('\n') : text }]
+          const blocks: Array<{ type: string; text?: string }> = [
+            { type: 'text', text: lines.length > 1 ? lines.join('\n') : text },
+          ]
+          const words = Array.isArray((value as any).words) ? ((value as any).words as Row[]) : []
+          if (words.length) {
+            blocks.push({ type: 'text', text: '\nword_boxes (x,y,w,h):\n' + JSON.stringify(words, null, 2) })
+          }
+          return blocks as any
         },
       },
       timeoutMs: 90000,
