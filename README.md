@@ -13,14 +13,23 @@
 - **跨平台**：Windows（完整）/ macOS(Phase 1) / Linux(Phase 2)。
 - **开箱即用**：包内自带 Python cvision 与依赖清单，`CVISION_DIR` 默认指向包内。
 
+## 版本
+
+- **v0.2.0**：OCR 返回**词级边界框** `words`；新增 `screen_info` / `cvision_status` / `wait_for_window` /
+  `drag` / `get_clipboard` / `set_clipboard`；`scroll` 支持水平、`see(ocr:true)` 一次返回图片+文本；
+  新增**持久化 Python server**（复用 D3D 设备/编码，失败自动回退每调用 CLI）。
+
 ## 工具一览
 
 ### 看（观察）
 | 工具 | 说明 |
 | --- | --- |
-| `see(window?, region?, delay?, maximize?)` | 截屏/窗口 → **图片**返回（模型原生看）。`region="x,y,w,h"` 只取一块（省 token）；`delay=毫秒` 等渲染；`maximize` 默认关 |
-| `ocr(window?, region?, delay?)` | 截屏后 **OCR** → 返回**文本**（终端/网页/文档快速读字，省整图 token） |
+| `see(window?, region?, delay?, maximize?, format?, ocr?)` | 截屏/窗口 → **图片**返回（模型原生看）。`region="x,y,w,h"` 只取一块（省 token）；`delay=毫秒` 等渲染；`maximize` 默认关；`ocr=true` 同时返回 OCR 文本/词框 |
+| `ocr(window?, region?, delay?)` | 截屏后 **OCR** → 返回**文本 + 词级边界框 `words`**（`{text,x,y,w,h}`，供 computer-use 精确定位点击点） |
 | `list_windows()` | 列出可见窗口（标题+句柄+尺寸） |
+| `screen_info()` | 列出显示器/DPI 布局（`x/y/width/height/primary/scale`），高 DPI 折算坐标用 |
+| `cvision_status()` | 运行环境健康探针（python 版本、平台后端、OCR 引擎、依赖/后端可用性） |
+| `wait_for_window(title?, timeout?)` | 轮询等某个窗口出现（默认 500ms/次，10s 超时） |
 
 ### 操作（computer-use，模拟用户级输入）
 | 工具 | 说明 |
@@ -28,9 +37,11 @@
 | `click(x, y, button?)` | 屏幕绝对坐标**单击**（left/right/middle） |
 | `double_click(x, y)` | 屏幕绝对坐标**双击** |
 | `mouse_move(x, y)` | 移动鼠标到屏幕坐标（不点击） |
-| `scroll(x, y, dy)` | 在 (x,y) 处滚动（dy>0 上滚，<0 下滚） |
+| `scroll(x, y, dy?, dx?)` | 在 (x,y) 处滚动（dy>0 上滚，<0 下滚；dx 为水平滚动） |
+| `drag(x1, y1, x2, y2, button?)` | 从 (x1,y1) 拖拽到 (x2,y2)（框选/拖文件） |
 | `type_text(text)` | 像键盘一样**输入文本**到当前焦点 |
 | `press_key(keys)` | 发送**快捷键**，如 `ctrl+l`、`enter`、`ctrl+shift+t`、`alt+tab` |
+| `get_clipboard()` / `set_clipboard(text)` | 读写剪贴板文本 |
 | `focus_window(title)` | 按标题子串把窗口**置前**（用户级激活） |
 
 > **关键**：默认**不最大化、不切前台**——WGC 抓窗口合成内容，与前台/遮挡无关。

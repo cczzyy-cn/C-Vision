@@ -102,6 +102,69 @@ def scroll(x: int, y: int, dx: int = 0, dy: int = 0) -> None:
         pg.hscroll(dx, x, y)
 
 
+def drag(x1: int, y1: int, x2: int, y2: int, button: str = "left") -> None:
+    """从 (x1,y1) 拖拽到 (x2,y2)（模拟按住左键拖动）。"""
+    pg = _require_pyautogui()
+    pg.moveTo(x1, y1, duration=0.1)
+    pg.dragTo(x2, y2, duration=0.3, button=button)
+
+
+def _win_clipboard_text() -> str | None:
+    try:
+        import win32clipboard
+        import win32con
+    except ImportError as e:  # pragma: no cover - 仅当未装 pywin32
+        raise RuntimeError("Windows 剪贴板需要 pywin32：pip install pywin32") from e
+    win32clipboard.OpenClipboard()
+    try:
+        if win32clipboard.IsClipboardFormatAvailable(win32con.CF_UNICODETEXT):
+            return win32clipboard.GetClipboardData(win32con.CF_UNICODETEXT)
+        return ""
+    finally:
+        win32clipboard.CloseClipboard()
+
+
+def _win_set_clipboard(text: str) -> None:
+    try:
+        import win32clipboard
+        import win32con
+    except ImportError as e:  # pragma: no cover - 仅当未装 pywin32
+        raise RuntimeError("Windows 剪贴板需要 pywin32：pip install pywin32") from e
+    win32clipboard.OpenClipboard()
+    try:
+        win32clipboard.EmptyClipboard()
+        win32clipboard.SetClipboardData(win32con.CF_UNICODETEXT, text)
+    finally:
+        win32clipboard.CloseClipboard()
+
+
+def get_clipboard() -> str:
+    """读取剪贴板文本（Windows 原生；其他平台尝试 pyperclip，缺则报错）。"""
+    if _is_windows():
+        return _win_clipboard_text() or ""
+    try:
+        import pyperclip  # type: ignore[import-not-found]
+        return pyperclip.paste()
+    except Exception:
+        raise RuntimeError(
+            "剪贴板读取仅支持 Windows（pywin32）；其他平台请先 pip install pyperclip"
+        )
+
+
+def set_clipboard(text: str) -> None:
+    """写入剪贴板文本。"""
+    if _is_windows():
+        _win_set_clipboard(text)
+        return
+    try:
+        import pyperclip  # type: ignore[import-not-found]
+        pyperclip.copy(text)
+    except Exception:
+        raise RuntimeError(
+            "剪贴板写入仅支持 Windows（pywin32）；其他平台请先 pip install pyperclip"
+        )
+
+
 def _paste_clipboard(text: str) -> None:
     """用剪贴板 + Ctrl+V 输入非 ASCII 文本（pyautogui.write 打不进中文等）。"""
     try:
@@ -154,4 +217,4 @@ def press_keys(keys: str) -> None:
 
 
 # 供 CLI/测试判断能力
-CAPABILITIES = ["click", "double_click", "move", "scroll", "type_text", "press_keys", "focus_window"]
+CAPABILITIES = ["click", "double_click", "move", "scroll", "drag", "type_text", "press_keys", "focus_window", "get_clipboard", "set_clipboard"]

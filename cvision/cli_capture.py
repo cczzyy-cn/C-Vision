@@ -24,6 +24,8 @@ from cvision import capturer, encoding
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="截屏输出 base64 data URL，或列出窗口")
     parser.add_argument("--list", action="store_true", help="列出可见窗口(JSON)，不截图")
+    parser.add_argument("--screen-info", action="store_true", help="输出显示器/DPI 布局(JSON)，不截图")
+    parser.add_argument("--status", action="store_true", help="输出运行环境健康状态(JSON)，不截图")
     parser.add_argument("--window", default=None, help="窗口标题子串；留空则截全屏")
     parser.add_argument("--handle", type=int, default=None, help="窗口句柄")
     parser.add_argument("--maximize", action="store_true", help="先最大化目标窗口再截")
@@ -38,6 +40,18 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write(
             json.dumps([w.to_dict() for w in capturer.list_windows()], ensure_ascii=True)
         )
+        return 0
+
+    if args.screen_info:
+        from cvision import screen
+
+        sys.stdout.write(json.dumps(screen.screen_info(), ensure_ascii=True))
+        return 0
+
+    if args.status:
+        from cvision import status
+
+        sys.stdout.write(json.dumps(status.status(), ensure_ascii=True))
         return 0
 
     if args.delay:

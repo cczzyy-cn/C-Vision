@@ -1,22 +1,21 @@
 /**
  * C-Vision 视觉插件（DeepSeek Harness / DSH bundle）
  *
- * 注册 `see` 工具：跨语言调用本插件包内捆绑的 Python 版 cvision 截屏（全屏或指定
- * 窗口），把截图写入 Harness 附件服务（`ctx.attachments.saveImage`），并通过 `image`
- * ContentBlock 返回，使模型能**原生看到**这张图片（描述 / 识别截图文字 / 读图表）。
+ * 注册观察（see/ocr/list_windows）与 computer-use（click/type_text/...）工具：
+ * 跨语言调用本插件包内捆绑的 Python 版 cvision（截屏/OCR/输入），把截图写入 Harness
+ * 附件服务（`ctx.attachments.saveImage`）并以 `image` ContentBlock 返回。
+ *
+ * v0.2.0 增强：
+ *   - OCR 返回词级边界框（`words`，用于 computer-use 精确定位点击点）。
+ *   - 新增 `screen_info`（显示器/DPI 布局）与 `cvision_status`（运行环境健康）。
+ *   - computer-use 补全：`drag`、`scroll` 支持水平、`get_clipboard`/`set_clipboard`、
+ *     `see(ocr:true)` 一次返回图片+文本、`wait_for_window`。
+ *   - 持久化 Python server（复用 D3D 设备/编码，避免每次冷启动）；失败时回退每调用 CLI。
  *
  * 分发：插件包自带 `cvision/` 与 `requirements.txt`，`CVISION_DIR` 默认定位到本插件
- * 安装目录（向上查找含 `cvision/` 的包根），无需外部绝对路径。目标机器只需有
- * Python 3 并 `pip install -r requirements.txt` 一次。
- *
- * 构建：本文件为 TypeScript 源，`pnpm build`（tsc）编译到 `lib/index.js`；DSH 运行
- * 时只加载编译后的 JS。
- *
- * 环境变量：
- *   CVISION_PYTHON   Python 可执行文件（默认 `python`）。
- *   CVISION_DIR      cvision 项目根（含 `cvision/` 包）。默认 = 本插件安装目录。
+ * 安装目录。目标机器需 Python 3 并 `pip install -r requirements.txt` 一次。
  */
-import { execFile } from 'node:child_process'
+import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { promisify } from 'node:util'
 import { existsSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
@@ -34,6 +33,9 @@ export const inject = ['tools', 'attachments']
 const MEDIA_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'] as const
 type MediaType = (typeof MEDIA_TYPES)[number]
 
+type Json = Record<string, unknown>
+type Row = Record<string, JsonValue>
+
 /** 从插件自身位置向上查找含 `cvision/` 的包根（入口在 lib/index.js 时需上移一层）。 */
 function findPluginRoot(): string {
   let dir = dirname(fileURLToPath(import.meta.url))
@@ -50,14 +52,8 @@ const PLUGIN_DIR = findPluginRoot()
 const PYTHON = process.env.CVISION_PYTHON ?? 'python'
 const CVISION_DIR = process.env.CVISION_DIR || PLUGIN_DIR
 
-interface ParsedCapture {
-  data: Uint8Array
-  mediaType: MediaType
-  ext: string
-}
-
 /** 解析 `data:<mime>;base64,<data>` 为附件服务所需的字节与媒体类型。 */
-function parseDataUrl(dataUrl: string): ParsedCapture {
+function parseDataUrl(dataUrl: string): { data: Uint8Array; mediaType: MediaType; ext: string } {
   const m = /^data:(image\/[a-z+]+);base64,(.+)$/s.exec(String(dataUrl).trim())
   if (!m || !m[1] || !m[2]) throw new Error(`无法解析截屏 data URL（长度 ${String(dataUrl).length}）`)
   const mediaType = m[1] as MediaType
@@ -71,7 +67,7 @@ function parseDataUrl(dataUrl: string): ParsedCapture {
   return { data: new Uint8Array(Buffer.from(m[2], 'base64')), mediaType, ext }
 }
 
-/** 断言包内（或 CVISION_DIR 指向）的 Python 版 cvision 存在，否则给出可操作报错。 */
+/** 断言包内（或 CVISION_DIR 指向）的 Python 版 cvision 存在。 */
 function assertCvisionPresent(): void {
   if (!existsSync(resolve(CVISION_DIR, 'cvision'))) {
     throw new Error(
@@ -81,7 +77,7 @@ function assertCvisionPresent(): void {
   }
 }
 
-/** 运行一次用户级输入（python -m cvision.cli_input <args>），失败会抛出子进程错误。 */
+/** 运行一次用户级输入（python -m cvision.cli_input <args>）。 */
 async function runCliInput(args: string[], exec: { signal: AbortSignal }): Promise<void> {
   assertCvisionPresent()
   await execFileAsync(PYTHON, ['-m', 'cvision.cli_input', ...args], {
@@ -91,7 +87,223 @@ async function runCliInput(args: string[], exec: { signal: AbortSignal }): Promi
   })
 }
 
+/** 运行一次纯采集类 CLI（python -m cvision.cli_capture <args>），返回 stdout。 */
+async function runCliCapture(args: string[], exec: { signal: AbortSignal }): Promise<string> {
+  assertCvisionPresent()
+  const { stdout } = await execFileAsync(PYTHON, ['-m', 'cvision.cli_capture', ...args], {
+    cwd: CVISION_DIR,
+    maxBuffer: 64 * 1024 * 1024,
+    signal: exec.signal,
+  })
+  return stdout.trim()
+}
+
+// ── 持久化 Python server（复用 D3D 设备/编码；失败自动回退每调用 CLI） ────────────
+interface Pending {
+  req: Json
+  resolve: (v: Json) => void
+  reject: (e: Error) => void
+  timer: NodeJS.Timeout
+}
+
+class CvisionServer {
+  private child: ChildProcessWithoutNullStreams | null = null
+  private buffer = ''
+  private queue: Pending[] = []
+  private busy = false
+  private down = false
+
+  constructor(private defaultTimeoutMs: number) {}
+
+  private ensure(): void {
+    if (this.child) return
+    const child = spawn(PYTHON, ['-m', 'cvision.cli_server'], {
+      cwd: CVISION_DIR,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
+    this.child = child
+    child.stdout.setEncoding('utf8')
+    child.stderr.setEncoding('utf8')
+    child.stdout.on('data', (chunk: string) => {
+      this.buffer += chunk
+      this.drainLines()
+    })
+    child.stderr.on('data', () => {})
+    child.on('exit', () => this.fatal(new Error('cvision server exited')))
+    child.on('error', (e) => this.fatal(new Error(`cvision server spawn failed: ${String(e)}`)))
+  }
+
+  private drainLines(): void {
+    for (;;) {
+      const idx = this.buffer.indexOf('\n')
+      if (idx < 0) break
+      const line = this.buffer.slice(0, idx).trim()
+      this.buffer = this.buffer.slice(idx + 1)
+      if (line) this.handleLine(line)
+    }
+  }
+
+  private handleLine(line: string): void {
+    let resp: Json
+    try {
+      resp = JSON.parse(line) as Json
+    } catch {
+      return
+    }
+    const next = this.queue.shift()
+    if (!next) return
+    clearTimeout(next.timer)
+    this.busy = false
+    if (resp.ok === false) {
+      next.reject(new Error(String(resp.error ?? 'cvision server error')))
+    } else {
+      next.resolve(resp)
+    }
+    this.drain()
+  }
+
+  private drain(): void {
+    if (this.busy || this.queue.length === 0) return
+    if (!this.child) return
+    this.busy = true
+    this.child.stdin.write(JSON.stringify(this.queue[0].req) + '\n')
+  }
+
+  request(req: Json, exec?: { signal: AbortSignal }): Promise<Json> {
+    if (this.down) return Promise.reject(new Error('cvision server is down'))
+    this.ensure()
+    return new Promise<Json>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        // 超时视为 server 不可用：整体回收并回退 CLI，避免后续响应错位。
+        this.fatal(new Error('cvision server timed out'))
+        reject(new Error('cvision server timed out'))
+      }, this.defaultTimeoutMs)
+      const abort = () => reject(new Error('aborted'))
+      exec?.signal?.addEventListener('abort', abort, { once: true })
+      this.queue.push({
+        req,
+        resolve: (v) => {
+          exec?.signal?.removeEventListener('abort', abort)
+          resolve(v)
+        },
+        reject: (e) => {
+          exec?.signal?.removeEventListener('abort', abort)
+          reject(e)
+        },
+        timer,
+      })
+      this.drain()
+    })
+  }
+
+  private fatal(err: Error): void {
+    this.down = true
+    for (const p of this.queue) {
+      clearTimeout(p.timer)
+      p.reject(err)
+    }
+    this.queue = []
+    this.busy = false
+    try {
+      this.child?.kill()
+    } catch {
+      /* ignore */
+    }
+    this.child = null
+  }
+
+  dispose(): void {
+    try {
+      this.child?.stdin.write(JSON.stringify({ op: 'quit' }) + '\n')
+    } catch {
+      /* ignore */
+    }
+    try {
+      this.child?.kill()
+    } catch {
+      /* ignore */
+    }
+    this.child = null
+    this.down = true
+  }
+}
+
 export function apply(ctx: Context): void {
+  const server = new CvisionServer(30000)
+  ctx.effect(() => () => server.dispose())
+
+  // ① server 优先，失败回退 CLI 的采集类辅助（每个返回统一形态）。
+  async function captureDataUrl(args: Json, exec: { signal: AbortSignal }): Promise<string> {
+    try {
+      const resp = await server.request({ op: 'capture', ...args }, exec)
+      return String(resp.data_url ?? '')
+    } catch {
+      const cli = ['--format', String(args.format ?? 'PNG')]
+      if (args.handle != null) cli.push('--handle', String(args.handle))
+      if (args.window) cli.push('--window', String(args.window))
+      if (args.maximize) cli.push('--maximize')
+      if (args.region) cli.push('--region', String(args.region))
+      if (args.delay) cli.push('--delay', String(args.delay))
+      return runCliCapture(cli, exec)
+    }
+  }
+
+  async function ocrJson(args: Json, exec: { signal: AbortSignal }): Promise<{ text: string; lines: string[]; words: Row[] }> {
+    try {
+      const resp = await server.request({ op: 'ocr', ...args }, exec)
+      return {
+        text: String(resp.text ?? ''),
+        lines: Array.isArray(resp.lines) ? (resp.lines as string[]) : [],
+        words: Array.isArray(resp.words) ? (resp.words as Row[]) : [],
+      }
+    } catch {
+      const cli = []
+      if (args.handle != null) cli.push('--handle', String(args.handle))
+      if (args.window) cli.push('--window', String(args.window))
+      if (args.maximize) cli.push('--maximize')
+      if (args.region) cli.push('--region', String(args.region))
+      if (args.delay) cli.push('--delay', String(args.delay))
+      const { stdout } = await execFileAsync(PYTHON, ['-m', 'cvision.cli_ocr', ...cli], {
+        cwd: CVISION_DIR,
+        maxBuffer: 4 * 1024 * 1024,
+        signal: exec.signal,
+      })
+      const info = JSON.parse(stdout) as { text?: string; lines?: string[]; words?: Row[] }
+      return { text: info.text ?? '', lines: info.lines ?? [], words: info.words ?? [] }
+    }
+  }
+
+  async function listWindowsJson(exec: { signal: AbortSignal }): Promise<Row[]> {
+    try {
+      const resp = await server.request({ op: 'list' }, exec)
+      return Array.isArray(resp.windows) ? (resp.windows as Row[]) : []
+    } catch {
+      const out = await runCliCapture(['--list'], exec)
+      return JSON.parse(out) as Row[]
+    }
+  }
+
+  async function screenInfoJson(exec: { signal: AbortSignal }): Promise<Row[]> {
+    try {
+      const resp = await server.request({ op: 'screen_info' }, exec)
+      return Array.isArray(resp.displays) ? (resp.displays as Row[]) : []
+    } catch {
+      const out = await runCliCapture(['--screen-info'], exec)
+      return JSON.parse(out) as Row[]
+    }
+  }
+
+  async function statusJson(exec: { signal: AbortSignal }): Promise<Row> {
+    try {
+      const resp = await server.request({ op: 'status' }, exec)
+      return (resp.status as Row) ?? {}
+    } catch {
+      const out = await runCliCapture(['--status'], exec)
+      return JSON.parse(out) as Row
+    }
+  }
+
+  // ── see ────────────────────────────────────────────────────────────────────
   ctx.tools.register(
     defineTool({
       name: 'see',
@@ -99,7 +311,8 @@ export function apply(ctx: Context): void {
         '截取整个屏幕或某个窗口，并把截图以图片形式返回，让模型直接查看画面内容（描述、识别截图文字、读取图表/文档）。' +
         '用 window 指定窗口标题子串（如 "Visual Studio Code"），或用 handle 传入 list_windows 给出的精确句柄（更可靠，避免标题撞车）；留空则截全屏。' +
         '默认尽量别传 maximize=true：非最小化窗口会直接抓到其真实内容，且不切换前台、不抢焦点。' +
-        '仅当窗口已最小化/太小/被遮挡看不清时才用 maximize=true（截图后会自动还原原状态）。',
+        '仅当窗口已最小化/太小/被遮挡看不清时才用 maximize=true（截图后会自动还原原状态）。' +
+        '传 ocr=true 可在返回图片的同时附带 OCR 文本/词框（省去一次 ocr 调用）。',
       parameters: {
         window: { type: 'string', description: '窗口标题子串（忽略大小写）；留空则截整屏' },
         handle: { type: 'integer', description: '窗口句柄（来自 list_windows），比 window 更精确；与 window 二选一，优先 handle' },
@@ -110,53 +323,60 @@ export function apply(ctx: Context): void {
         region: { type: 'string', description: '裁剪区域 x,y,w,h（像素，相对截图），只抓窗口内一小块，省 token' },
         delay: { type: 'number', description: '抓取前等待毫秒（给需要渲染的内容），可选' },
         format: { type: 'string', description: 'PNG/JPEG/WEBP/GIF，默认 PNG' },
+        ocr: { type: 'boolean', description: '可选：同一截图额外做 OCR 并返回 text/lines/words' },
       },
       output: {
-        // 规范：用 DSH value schema DSL；对象节点须显式声明 additionalProperties。
         schema: {
           type: 'object',
-          properties: { ref: { type: 'object', additionalProperties: true } },
+          properties: {
+            ref: { type: 'object', additionalProperties: true },
+            text: { type: 'string' },
+            lines: { type: 'array', items: { type: 'string' } },
+            words: { type: 'array', items: { type: 'object', additionalProperties: true } },
+          },
           additionalProperties: false,
         },
-        render: (_args, value) => [{ type: 'image', attachment: value.ref as unknown as ImageAttachmentRef }],
+        render: (_args, value) => {
+          const blocks: Array<{ type: string; attachment?: ImageAttachmentRef; text?: string }> = [
+            { type: 'image', attachment: (value as any).ref as ImageAttachmentRef },
+          ]
+          const text = String((value as any).text ?? '')
+          if (text) blocks.push({ type: 'text', text })
+          return blocks as any
+        },
       },
-      // 协作式超时：把 exec.signal 转给子进程，取消/超时即终止 python 截屏。
       timeoutMs: 60000,
       async execute(args, exec) {
         assertCvisionPresent()
-        const format = (args.format ?? 'PNG').toUpperCase()
-        const cmdArgs = ['-m', 'cvision.cli_capture', '--format', format]
-        if (args.handle != null) cmdArgs.push('--handle', String(args.handle))
-        if (args.window) cmdArgs.push('--window', String(args.window))
-        if (args.maximize) cmdArgs.push('--maximize')
-        if (args.region) cmdArgs.push('--region', String(args.region))
-        if (args.delay) cmdArgs.push('--delay', String(args.delay))
-
-        const { stdout } = await execFileAsync(PYTHON, cmdArgs, {
-          cwd: CVISION_DIR,
-          maxBuffer: 64 * 1024 * 1024,
-          signal: exec.signal,
-        })
-        const { data, mediaType, ext } = parseDataUrl(stdout)
-        // 持久化到附件服务，换取模型可见的不可变引用。
-        const ref = await ctx.attachments.saveImage({
-          data,
-          mediaType,
-          name: `vision-capture.${ext}`,
-        })
-        // value schema 推断出的是开放对象（Record<string, JsonValue>），此处为不透明
-        // 附件引用，需显式断言到该推断形态。
-        return { ref: ref as unknown as Record<string, JsonValue> }
+        const req: Json = { format: (args.format ?? 'PNG').toUpperCase() }
+        if (args.handle != null) req.handle = args.handle
+        if (args.window) req.window = String(args.window)
+        if (args.maximize) req.maximize = true
+        if (args.region) req.region = String(args.region)
+        if (args.delay) req.delay = Number(args.delay)
+        const dataUrl = await captureDataUrl(req, exec)
+        const { data, mediaType, ext } = parseDataUrl(dataUrl)
+        const ref = await ctx.attachments.saveImage({ data, mediaType, name: `vision-capture.${ext}` })
+        const out: { ref: Record<string, JsonValue>; text?: string; lines?: string[]; words?: Row[] } = {
+          ref: ref as unknown as Record<string, JsonValue>,
+        }
+        if (args.ocr) {
+          const o = await ocrJson(req, exec)
+          out.text = o.text
+          out.lines = o.lines
+          out.words = o.words
+        }
+        return out
       },
     }),
   )
 
+  // ── ocr（返回 text/lines/words） ──────────────────────────────────────────
   ctx.tools.register(
     defineTool({
       name: 'ocr',
       description:
-        '截取屏幕/窗口（可 region/delay），用 OCR 识别其中的文字并**返回文本**。' +
-        '适合终端、网页、文档等只要读文字的场合（省去整图 token）。' +
+        '截取屏幕/窗口（可 region/delay），用 OCR 识别其中的文字并**返回文本**（含词级边界框 words，供 computer-use 精确定位点击）。' +
         '参数同 see（window/title/maximize/region/delay）。',
       parameters: {
         window: { type: 'string', description: '窗口标题子串；留空则对整屏 OCR' },
@@ -171,6 +391,7 @@ export function apply(ctx: Context): void {
           properties: {
             text: { type: 'string' },
             lines: { type: 'array', items: { type: 'string' } },
+            words: { type: 'array', items: { type: 'object', additionalProperties: true } },
           },
           additionalProperties: false,
         },
@@ -183,23 +404,18 @@ export function apply(ctx: Context): void {
       timeoutMs: 90000,
       async execute(args, exec) {
         assertCvisionPresent()
-        const cmdArgs = ['-m', 'cvision.cli_ocr']
-        if (args.handle != null) cmdArgs.push('--handle', String(args.handle))
-        if (args.window) cmdArgs.push('--window', String(args.window))
-        if (args.maximize) cmdArgs.push('--maximize')
-        if (args.region) cmdArgs.push('--region', String(args.region))
-        if (args.delay) cmdArgs.push('--delay', String(args.delay))
-        const { stdout } = await execFileAsync(PYTHON, cmdArgs, {
-          cwd: CVISION_DIR,
-          maxBuffer: 4 * 1024 * 1024,
-          signal: exec.signal,
-        })
-        const info = JSON.parse(stdout) as { text?: string; lines?: string[] }
-        return { text: info.text ?? '', lines: info.lines ?? [] }
+        const req: Json = {}
+        if (args.handle != null) req.handle = args.handle
+        if (args.window) req.window = String(args.window)
+        if (args.maximize) req.maximize = true
+        if (args.region) req.region = String(args.region)
+        if (args.delay) req.delay = Number(args.delay)
+        return await ocrJson(req, exec)
       },
     }),
   )
 
+  // ── list_windows ──────────────────────────────────────────────────────────
   ctx.tools.register(
     defineTool({
       name: 'list_windows',
@@ -210,32 +426,106 @@ export function apply(ctx: Context): void {
       output: {
         schema: {
           type: 'object',
-          properties: {
-            windows: {
-              type: 'array',
-              items: { type: 'object', additionalProperties: true },
-            },
-          },
+          properties: { windows: { type: 'array', items: { type: 'object', additionalProperties: true } } },
           additionalProperties: false,
         },
         render: (_args, value) => [{ type: 'text', text: JSON.stringify(value.windows, null, 2) }],
       },
       timeoutMs: 30000,
       async execute(_args, exec) {
-        assertCvisionPresent()
-        const { stdout } = await execFileAsync(PYTHON, ['-m', 'cvision.cli_capture', '--list'], {
-          cwd: CVISION_DIR,
-          maxBuffer: 4 * 1024 * 1024,
-          signal: exec.signal,
-        })
-        const windows = JSON.parse(stdout) as Array<Record<string, JsonValue>>
+        const windows = await listWindowsJson(exec)
         return { windows }
       },
     }),
   )
 
-  // ── 用户级操作（computer-use）：鼠标/键盘/聚焦 ──────────────────────────────
-  // 用法：先 see 看清屏幕定位坐标，再用这些工具操作，再 see 确认，形成"看→操作→看"闭环。
+  // ── screen_info（显示器/DPI 布局） ─────────────────────────────────────────
+  ctx.tools.register(
+    defineTool({
+      name: 'screen_info',
+      description:
+        '列出显示器/DPI 布局（每屏 x/y/width/height/primary/scale）。高 DPI 下模型需据此折算屏幕坐标，' +
+        '避免见到的像素与操作坐标错位。',
+      parameters: {},
+      output: {
+        schema: {
+          type: 'object',
+          properties: { displays: { type: 'array', items: { type: 'object', additionalProperties: true } } },
+          additionalProperties: false,
+        },
+        render: (_args, value) => [{ type: 'text', text: JSON.stringify(value.displays, null, 2) }],
+      },
+      timeoutMs: 30000,
+      async execute(_args, exec) {
+        const displays = await screenInfoJson(exec)
+        return { displays }
+      },
+    }),
+  )
+
+  // ── cvision_status（运行环境健康） ─────────────────────────────────────────
+  ctx.tools.register(
+    defineTool({
+      name: 'cvision_status',
+      description:
+        '检查 cvision 运行环境：python 版本、平台后端、OCR 引擎、依赖（Pillow/pyautogui/pywin32/winsdk）可达性，' +
+        '以及后端是否已实现。用于安装排错与确认能力。',
+      parameters: {},
+      output: {
+        schema: {
+          type: 'object',
+          properties: { status: { type: 'object', additionalProperties: true } },
+          additionalProperties: false,
+        },
+        render: (_args, value) => [{ type: 'text', text: JSON.stringify(value.status, null, 2) }],
+      },
+      timeoutMs: 30000,
+      async execute(_args, exec) {
+        const status = await statusJson(exec)
+        return { status }
+      },
+    }),
+  )
+
+  // ── wait_for_window（轮询等窗口出现） ───────────────────────────────────────
+  ctx.tools.register(
+    defineTool({
+      name: 'wait_for_window',
+      description:
+        '轮询等待某个窗口出现（按标题子串），直到命中或超时。用于「打开某应用后等它出现再抓图」。' +
+        '返回命中的窗口（或超时提示）。默认每 500ms 轮询，timeoutMs 默认 10000。',
+      parameters: {
+        title: { type: 'string', description: '要等待的窗口标题子串' },
+        timeout: { type: 'number', description: '超时毫秒，默认 10000' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          properties: { found: { type: 'boolean' }, window: { type: 'object', additionalProperties: true }, detail: { type: 'string' } },
+          additionalProperties: false,
+        },
+        render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
+      },
+      timeoutMs: 30000,
+      async execute(args, exec) {
+        const title = String(args.title || '').trim()
+        if (!title) throw new Error('wait_for_window 需要 title')
+        const timeout = Math.max(0, Number(args.timeout ?? 10000))
+        const start = Date.now()
+        const needle = title.toLowerCase()
+        for (;;) {
+          exec.signal.throwIfAborted()
+          const windows = await listWindowsJson(exec)
+          const hit = (windows as any[]).find((w: any) => String(w.title ?? '').toLowerCase().includes(needle))
+          if (hit) return { found: true, window: hit, detail: `found: ${hit.title}` }
+          if (Date.now() - start >= timeout) return { found: false, detail: `timeout after ${timeout}ms; no window title contains "${title}"` }
+          await new Promise((r) => setTimeout(r, 500))
+        }
+      },
+    }),
+  )
+
+  // ── 用户级操作（computer-use） ─────────────────────────────────────────────
   const inputOut = {
     schema: {
       type: 'object' as const,
@@ -294,12 +584,43 @@ export function apply(ctx: Context): void {
   ctx.tools.register(
     defineTool({
       name: 'scroll',
-      description: '在屏幕坐标 (x,y) 处滚动。dy>0 向上滚，dy<0 向下滚（单位：格）。',
-      parameters: { x: { type: 'integer' }, y: { type: 'integer' }, dy: { type: 'integer' } },
+      description: '在屏幕坐标 (x,y) 处滚动。dy>0 向上滚，dy<0 向下滚（单位：格）；dx 为水平滚动（可选）。',
+      parameters: {
+        x: { type: 'integer' },
+        y: { type: 'integer' },
+        dy: { type: 'integer', description: '竖直滚动格数（dy>0 向上）' },
+        dx: { type: 'integer', description: '可选水平滚动格数（dx>0 向右）' },
+      },
       output: inputOut,
       timeoutMs: 30000,
       async execute(args, exec) {
-        await runCliInput(['--scroll', String(args.x), String(args.y), String(args.dy)], exec)
+        if (args.dx) {
+          await runCliInput(['--scroll-h', String(args.x), String(args.y), String(args.dx)], exec)
+        } else {
+          await runCliInput(['--scroll', String(args.x), String(args.y), String(args.dy ?? 0)], exec)
+        }
+        return { ok: true }
+      },
+    }),
+  )
+
+  ctx.tools.register(
+    defineTool({
+      name: 'drag',
+      description: '从屏幕坐标 (x1,y1) 拖拽到 (x2,y2)（模拟按住左键拖动，如框选/拖文件）。默认左键。',
+      parameters: {
+        x1: { type: 'integer' },
+        y1: { type: 'integer' },
+        x2: { type: 'integer' },
+        y2: { type: 'integer' },
+        button: { type: 'string', description: 'left/right/middle，默认 left' },
+      },
+      output: inputOut,
+      timeoutMs: 30000,
+      async execute(args, exec) {
+        const cmd = ['--drag', String(args.x1), String(args.y1), String(args.x2), String(args.y2)]
+        if (args.button && args.button !== 'left') cmd.push('--button', String(args.button))
+        await runCliInput(cmd, exec)
         return { ok: true }
       },
     }),
@@ -333,6 +654,50 @@ export function apply(ctx: Context): void {
     }),
   )
 
+  const clipboardOut = {
+    schema: {
+      type: 'object' as const,
+      properties: { ok: { type: 'boolean' as const }, text: { type: 'string' as const } },
+      additionalProperties: false as const,
+    },
+    render: (_a: unknown, v: { ok?: boolean; text?: string }) => [
+      { type: 'text' as const, text: v.ok && v.text != null ? String(v.text) : (v.ok ? '已执行' : '未执行') },
+    ],
+  }
+
+  ctx.tools.register(
+    defineTool({
+      name: 'get_clipboard',
+      description: '读取当前剪贴板文本（Windows 原生；其他平台需 pyperclip）。',
+      parameters: {},
+      output: clipboardOut,
+      timeoutMs: 30000,
+      async execute(_args, exec) {
+        const { stdout } = await execFileAsync(PYTHON, ['-m', 'cvision.cli_input', '--get-clipboard'], {
+          cwd: CVISION_DIR,
+          maxBuffer: 4 * 1024 * 1024,
+          signal: exec.signal,
+        })
+        const info = JSON.parse(stdout) as { text?: string }
+        return { ok: true, text: info.text ?? '' }
+      },
+    }),
+  )
+
+  ctx.tools.register(
+    defineTool({
+      name: 'set_clipboard',
+      description: '把文本写入剪贴板（Windows 原生；其他平台需 pyperclip）。',
+      parameters: { text: { type: 'string', description: '要写入剪贴板的文本' } },
+      output: clipboardOut,
+      timeoutMs: 30000,
+      async execute(args, exec) {
+        await runCliInput(['--set-clipboard', String(args.text)], exec)
+        return { ok: true, text: String(args.text) }
+      },
+    }),
+  )
+
   ctx.tools.register(
     defineTool({
       name: 'focus_window',
@@ -353,5 +718,4 @@ export function apply(ctx: Context): void {
       },
     }),
   )
-
 }
